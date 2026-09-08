@@ -2,13 +2,14 @@
 
 **Stronghold by Iron Signal Systems**
 
-Stronghold is a two-appliance network security system built around complete network observation, comprehensive records, policy enforcement, retained packet history, and durable operational journals.
+Stronghold is an enforcement system that preserves the traffic presented to it before deciding what that traffic means or what should happen to it.
 
-**Stronghold FW** runs on Arch Linux and observes, records, authorizes, bridges or routes, and enforces live traffic.
+The system is built as two cooperating appliances:
 
-**Stronghold Net-Hunter** runs on FreeBSD with ZFS and jails and receives verified packet history and journals, processes network records, preserves historical PCAP, and provides a read-only hunt/query interface.
+- **Stronghold FW** runs on Arch Linux and observes, preserves, authorizes, bridges or routes, NATs where configured, enforces live traffic, and journals what actually happened.
+- **Stronghold Net-Hunter** runs on FreeBSD with ZFS and jails and receives verified packet history and journals, durably preserves them, processes and reprocesses network history, correlates records, and provides a read-only hunt/query interface over authoritative history.
 
-The system is built around five responsibilities:
+Stronghold is built around five responsibilities:
 
 ```text
 OBSERVE
@@ -20,6 +21,43 @@ ENFORCE
 REMEMBER
    ↓
 HUNT
+```
+
+A concise practitioner expression of the product philosophy is:
+
+> **Observe the truth. Preserve the history. Explain the decision.**
+
+## Stronghold Truth Model
+
+Stronghold separates three categories of truth:
+
+```text
+WHAT WAS PRESENTED
+    authoritative packet observation / PCAPNG
+
+WHAT STRONGHOLD DID
+    authoritative operational and decision journals
+
+WHAT STRONGHOLD UNDERSTOOD
+    derived interpretation and enrichment
+```
+
+Observation survives interpretation. A packet that Stronghold cannot decode today remains authoritative history if it was actually captured. A later decoder may create a new derived interpretation, but it must not rewrite the original packet observation.
+
+This means:
+
+```text
+not decoded
+!=
+not observed
+```
+
+and:
+
+```text
+missing interpretation
+!=
+proof the traffic did not exist
 ```
 
 ## Governing Principles
@@ -48,9 +86,73 @@ Retention is policy-driven and separate for PCAP and each journal domain. Holds 
 
 Stronghold treats forwarding availability, state synchronization, capture continuity, and historical durability as separate claims and records the actual outcome of each.
 
+> **Stronghold owns the appliance operating-system lifecycle.**
+
+Stronghold FW is built on Arch Linux, but supported Stronghold appliances receive Stronghold-qualified releases rather than unrestricted customer-driven rolling package updates. Net-Hunter similarly treats FreeBSD, ZFS, jails, and Stronghold applications as controlled appliance components with explicit compatibility and rollback boundaries.
+
+## Common Truth Separations
+
+Stronghold deliberately preserves distinctions that conventional logging systems often blur:
+
+```text
+route available
+!=
+route authorized
+
+certificate valid
+!=
+peer authorized
+
+packet not decoded
+!=
+packet not observed
+
+no journal record
+!=
+event did not occur
+
+timestamp precision
+!=
+timestamp accuracy
+
+policy allowed
+!=
+forwarding succeeded
+
+object expired
+!=
+destruction authorized
+
+bytes received
+!=
+history durably committed
+
+archived
+!=
+destroyed
+
+new interpretation
+!=
+new historical observation
+
+forwarding HA succeeded
+!=
+capture continuity guaranteed
+
+virtual cluster identity
+!=
+physical capture identity
+
+software installed
+!=
+Stronghold update validated
+```
+
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
+
+Physical-interface frame observation is a product invariant of the enforcement appliance itself.
 
 The intended visibility baseline is Wireshark/dumpcap on the same supported physical interface under the same conditions.
 
@@ -79,12 +181,15 @@ Current platform direction:
 
 ### FW packet-processing model
 
-Stronghold policy semantics are intentionally authorization-first:
+Observation is always before interpretation. Stronghold then establishes only the facts required to make the earliest valid authorization decision before permitting unnecessary forwarding/deep-processing work.
 
 ```text
 PACKET / FRAME ARRIVES
         │
-        ├──────────────► CAPTURE / OBSERVE
+        ├──────────────► CAPTURE / OBSERVE / PRESERVE
+        │
+        ▼
+ESTABLISH REQUIRED POLICY FACTS
         │
         ▼
 EARLY INGRESS AUTHORIZATION
@@ -94,15 +199,20 @@ EARLY INGRESS AUTHORIZATION
         └── authorized to proceed
                     │
                     ▼
-               ROUTING
+             BRIDGE / ROUTING
                     │
                     ▼
-        NAT / STATE / REQUIRED
-           DEEPER PROCESSING
+         WAN / NAT / STATE /
+      REQUIRED DEEPER PROCESSING
                     │
                     ▼
               FINAL EGRESS
+                    │
+                    ▼
+          JOURNAL ACTUAL RESULT
 ```
+
+A successful route/FIB lookup may be technically required to establish some classification facts in a future implementation, but a route lookup never itself grants authorization.
 
 For future Layer-7 policy, an early authorization may mean only that a packet/session is permitted to consume the processing needed to reach a final decision. Stronghold must not report a final Layer-7 allow before the required application-layer fact has actually been established.
 
@@ -295,6 +405,84 @@ HA history should distinguish events such as peer loss, sync lag/out-of-sync sta
 
 Dynamic-WAN HA for DHCP/PPPoE or other protocol-bound WAN identity requires a later protocol-specific contract; initial HA architecture assumes static or otherwise cluster-transferable forwarding identity.
 
+## Stronghold-Controlled Appliance Lifecycle and Updates
+
+Stronghold FW uses Arch Linux as the platform foundation, but the appliance is not intended to be managed as a general-purpose rolling-release Arch host.
+
+Stronghold-qualified releases should bind and validate the versions/compatibility of the components that materially define appliance behavior, including as applicable:
+
+```text
+Stronghold software
+Linux kernel
+NIC drivers / managed firmware
+nftables / netfilter
+capture stack
+system libraries required by Stronghold
+configuration schema
+journal/schema versions
+HA protocol and state-sync format
+```
+
+The governing lifecycle is:
+
+```text
+SIGNED / VERIFIED RELEASE
+        ↓
+PREFLIGHT
+        ↓
+COMPATIBILITY CHECK
+        ↓
+CHECKPOINT / SNAPSHOT WHERE APPLICABLE
+        ↓
+INSTALL
+        ↓
+REBOOT IF REQUIRED
+        ↓
+STRONGHOLD VALIDATION
+        ↓
+READY
+```
+
+A successful boot or successful package installation is not sufficient to declare an update successful. Updates that affect the kernel, NIC drivers, firmware, AF_PACKET/AF_XDP, nftables/netfilter, or storage/capture path require capture/enforcement regression validation appropriate to the change.
+
+Stronghold should support cryptographically verified online delivery and signed offline update bundles so restricted networks do not require public-Internet access to remain maintainable.
+
+Btrfs snapshots/checkpoints may assist FW rollback, but a filesystem snapshot alone does not define rollback correctness. Rollback must account for boot state, software version, configuration schema, journal/state formats, and HA compatibility.
+
+### HA rolling updates
+
+For an active/standby pair, the preferred update sequence is:
+
+```text
+FW-A ACTIVE
+FW-B STANDBY
+      ↓
+update FW-B
+      ↓
+validate FW-B
+      ↓
+controlled failover
+      ↓
+FW-B ACTIVE
+FW-A STANDBY
+      ↓
+validate production state
+      ↓
+update FW-A
+      ↓
+validate cluster health
+```
+
+A failed standby update stops the rolling process. Stronghold must not automatically risk the remaining healthy active node after the peer update fails.
+
+Mixed-version operation is temporary and permitted only inside an explicitly supported upgrade compatibility window. Software version, configuration schema, HA protocol version, and state-sync format are separately versioned/negotiated compatibility facts. A peer that cannot safely exchange required state is degraded or ineligible for promotion rather than silently dropping unknown state.
+
+A configuration schema migration is itself a controlled transition. Source schema/configuration state must remain recoverable until the target schema has validated. Downgrade/rollback must restore compatible configuration/state rather than merely reinstalling old binaries.
+
+### Standalone FW updates
+
+A standalone Stronghold FW has a real forwarding/capture outage when an update requires reboot or service interruption. Stronghold should finalize active capture segments where possible, journal the planned transition, perform the controlled update, and report the actual outage rather than calling it high availability.
+
 ## Administrative Identity and Authorization
 
 Stronghold separates authentication, authorization, and journaling of administrative activity.
@@ -320,8 +508,11 @@ validate candidate configuration
 commit configuration
 rollback configuration
 system administration
+HA administration
 hunt/query history
 export packet history
+retention / hold / destruction administration
+appliance update administration
 ```
 
 Viewing Hunter history does not imply permission to export packet data, and access to Net-Hunter does not imply authority to administer Stronghold FW.
@@ -378,7 +569,8 @@ Administrative Journal
 
 System / Health Journal
     interface/NIC state, capture loss, storage, services,
-    Hunter availability, route/WAN health, HA state, ZFS/jail health
+    Hunter availability, route/WAN health, HA state, ZFS/jail health,
+    update/validation health
 
 Traffic Decision Journal
     authorization, bridge/route, firewall, NAT, WAN selection,
@@ -527,13 +719,40 @@ Net-Hunter currently has four defined application jails:
 
 Writable UI storage, when required, is limited to non-authoritative material such as temporary session state, derived exports, reports, investigation notes, and download staging. User-created material becomes new non-authoritative history; it does not mutate the source record it references.
 
+### Net-Hunter lifecycle/update direction
+
+Net-Hunter update control is layered rather than one uncontrolled host-wide operation:
+
+```text
+FreeBSD host
+Stronghold host-management layer
+jails
+applications within jails
+processed-record / index schemas
+External UI
+```
+
+Planned Hunter maintenance may temporarily stop ingest/query services, but it must not stop FW capture. FW appliances accumulate local backlog while Hunter is intentionally unavailable.
+
+Application/derived indexes are rebuildable from authoritative PCAP and source journals; an index migration failure must not rewrite or endanger source history.
+
+FreeBSD or ZFS software updates do **not** automatically authorize enabling irreversible ZFS pool features. Pool-format/feature upgrades are separate explicit compatibility operations because they may prevent rollback to an older FreeBSD/ZFS stack.
+
 ## Current Engineering Scope
 
-The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, retention, HA, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
+The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, retention, HA, appliance-lifecycle/update, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
 
-Later networking/enforcement/HA phase sequencing is intentionally not frozen yet.
+Later networking/enforcement/HA/update phase sequencing is intentionally not frozen yet.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Engineering Completeness Test
+
+A useful Stronghold design/review question is:
+
+> **When this fails at 2:00 AM, will Stronghold tell the operator exactly what it observed, what it decided, why it decided it, what it actually did, and what it could not establish?**
+
+If a feature cannot answer that question truthfully across its important failure paths, the feature is not complete.
 
 ## Engineering Standard
 
@@ -543,7 +762,7 @@ Repository and implementation behavior for contributors and coding agents is def
 
 ## Project Status
 
-Stronghold is pre-release and under active development. Interfaces, schemas, storage behavior, capture implementation details, Net-Hunter internals, and architecture may change before a supported release.
+Stronghold is pre-release and under active development. Interfaces, schemas, storage behavior, capture implementation details, Net-Hunter internals, HA details, update mechanics, and architecture may change before a supported release.
 
 ## License
 
