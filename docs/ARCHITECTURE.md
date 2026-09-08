@@ -10,6 +10,56 @@ This document records the current high-level architecture for Stronghold's captu
 
 Stronghold must prioritize receiving packets and durably writing active capture data over compression, tier migration, offload, deep indexing, and analytics.
 
+## Capture Invariant #1 — Wireshark-Class Interface Visibility
+
+Stronghold's first capture requirement is:
+
+> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, routes, or firewall-processes it.**
+
+The authoritative observation point is the configured supported physical interface, not a higher-level assumption about what Linux routes or what a firewall rule understands.
+
+A supported Stronghold capture path should provide the same class of visibility expected from Wireshark/dumpcap operating on the same supported physical interface under the same conditions.
+
+When presented to the interface, capture scope includes ordinary IPv4/IPv6 traffic as well as Layer-2 and control-plane traffic such as:
+
+```text
+ARP
+DHCP / BOOTP
+DHCPv6
+CDP
+LLDP
+STP / RSTP / MSTP
+LACP
+802.1X / EAPOL
+OSPFv2 / OSPFv3
+VRRP
+IGMP
+IPv6 NDP
+802.1Q VLAN traffic
+unknown EtherTypes
+unknown IP protocols
+vendor-specific frames
+malformed traffic
+```
+
+Protocol recognition is not a prerequisite for capture.
+
+```text
+presented to supported interface
+        ↓
+record frame / packet
+        ↓
+preserve authoritative bytes and capture metadata
+        ↓
+catalog what Stronghold can safely establish
+        ↓
+decode / enrich later when supported
+```
+
+Stronghold must not claim visibility into a frame that the upstream topology, NIC hardware, hardware filtering/offload behavior, or driver did not present to the supported capture path. "On the wire" and "observable by this NIC/capture path" are not always identical; Stronghold reports that distinction truthfully.
+
+NIC offloads and driver behavior that can alter the userspace representation of traffic, including VLAN metadata handling and packet aggregation, must be explicitly evaluated during hardware qualification and Phase 0 testing.
+
 ## Initial Appliance
 
 ```text
@@ -25,7 +75,7 @@ Format:          PCAPNG
 ## Capture Path
 
 ```text
-NIC
+physical NIC
  │
  ▼
 AF_PACKET / TPACKET_V3
@@ -163,6 +213,8 @@ segment_id
 ```
 
 Stronghold should not create one database row per packet merely to make traffic searchable. Flow/session metadata points back to the authoritative capture segment containing the packets.
+
+Unknown or undecoded traffic remains in the authoritative capture even when the traffic catalog cannot yet provide protocol-specific enrichment for it.
 
 ## Offload
 
