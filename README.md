@@ -2,11 +2,11 @@
 
 **Stronghold by Iron Signal Systems**
 
-Stronghold is a two-appliance network security system built around complete network observation, comprehensive records, policy enforcement, and retained packet history.
+Stronghold is a two-appliance network security system built around complete network observation, comprehensive records, policy enforcement, retained packet history, and durable operational journals.
 
-**Stronghold FW** runs on Arch Linux and observes, records, bridges or routes, and enforces live traffic.
+**Stronghold FW** runs on Arch Linux and observes, records, authorizes, bridges or routes, and enforces live traffic.
 
-**Stronghold Net-Hunter** runs on FreeBSD with ZFS and jails and receives verified packet history, processes network records, preserves historical PCAP, and provides a read-only hunt/query interface.
+**Stronghold Net-Hunter** runs on FreeBSD with ZFS and jails and receives verified packet history and journals, processes network records, preserves historical PCAP, and provides a read-only hunt/query interface.
 
 The system is built around five responsibilities:
 
@@ -35,6 +35,10 @@ A packet does not earn routing, NAT, or deeper forwarding work merely because it
 > **Path availability is not path permission.**
 
 Stronghold never assumes that a destination or service may use an alternate WAN merely because that WAN is physically available.
+
+> **History is journaled, not casually logged.**
+
+Administrative actions, system/health state, traffic decisions, trust changes, clock events, and Net-Hunter processing activity are preserved in separate append-oriented journals. Corrections and superseding state create new entries rather than silently rewriting prior history.
 
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
 
@@ -214,7 +218,119 @@ Rollback restores the content of a prior generation by creating a **new** genera
 
 Successful committed generations are intended to be versioned in the isolated Net-Hunter FW Configuration Backup Jail.
 
-### FW storage direction
+## Administrative Identity and Authorization
+
+Stronghold separates authentication, authorization, and journaling of administrative activity.
+
+Normal remote authentication may use:
+
+```text
+Active Directory via LDAPS only
+RADIUS
+TACACS+
+```
+
+For Active Directory, plaintext LDAP is not supported for authentication and Stronghold must never downgrade from LDAPS to LDAP because secure authentication is unavailable. LDAPS certificate validation is required.
+
+Protected local appliance identity remains available for installation, physical-console recovery, and explicit break-glass use. External authentication failure must not affect capture, routing, or firewall enforcement.
+
+Stronghold uses role-based authorization and keeps important privileges separable, including:
+
+```text
+view configuration
+edit candidate configuration
+validate candidate configuration
+commit configuration
+rollback configuration
+system administration
+hunt/query history
+export packet history
+```
+
+Viewing Hunter history does not imply permission to export packet data, and access to Net-Hunter does not imply authority to administer Stronghold FW.
+
+Normal remote administration is expected to enter through the `MANAGEMENT` role/interface and may be restricted to explicitly configured management source networks/hosts. The `HISTORY` interface is not a normal administrative login path.
+
+## Appliance Identity and History-Link Trust
+
+Stronghold FW and Net-Hunter mutually authenticate across the dedicated history network using mTLS.
+
+Each appliance has a stable Stronghold Appliance ID independent of hostname, IP address, or the individual certificate currently used to authenticate it.
+
+A valid certificate proves cryptographic identity; it does **not** automatically authorize a FW to send history to a Hunter. FW↔Hunter relationships are explicitly authorized and revocable.
+
+The architecture favors a Stronghold-specific appliance trust hierarchy rather than coupling history-link appliance identity directly to an organization's Active Directory PKI. Exact CA topology and enrollment mechanics remain to be frozen.
+
+Certificate rotation preserves the stable Appliance ID. Certificate expiry, revocation, or peer-authorization failure blocks history transfer and creates explicit backlog/degraded state, but does not stop the FW dataplane while local resources remain available.
+
+Management/UI certificates and history-transfer certificates are separate purposes. Successful mTLS also does not replace Stronghold segment identity, hashing, destination verification, commit, and acknowledgement.
+
+## Time and Clock Truthfulness
+
+Stronghold stores authoritative wall-clock timestamps in UTC. Local timezones are presentation only.
+
+Event ordering must not depend solely on wall-clock time. Journals and critical state maintain monotonic/advancing ordering so a wall-clock correction cannot silently reverse causality.
+
+Initial time synchronization is expected to support multiple configured NTP sources. NTS and PTP/hardware-assisted synchronization may be added later where justified.
+
+Stronghold distinguishes states such as:
+
+```text
+SYNCHRONIZED
+HOLDOVER
+UNSYNCHRONIZED
+CLOCK_FAULT
+```
+
+Clock corrections, source failures, significant offset changes, and changes in clock confidence are journaled. Loss of external time synchronization must not stop capture, routing, or firewall enforcement, but affected timestamps must not be presented with false confidence.
+
+Net-Hunter preserves the originating FW observation time separately from Hunter receipt, verification, processing, and commit time.
+
+> **Timestamp precision must never be presented as timestamp accuracy.**
+
+## Packet History and Journals
+
+Raw PCAPNG remains authoritative for what network traffic Stronghold observed. The operational history around that traffic is not treated as one generic log.
+
+Stronghold maintains separate append-oriented journal domains, including:
+
+```text
+Administrative Journal
+    authentication, MFA, role use, candidate/config actions,
+    commits, rollbacks, exports, break-glass, updates, reboot/shutdown
+
+System / Health Journal
+    interface/NIC state, capture loss, storage, services,
+    Hunter availability, route/WAN health, ZFS/jail health
+
+Traffic Decision Journal
+    authorization, bridge/route, firewall, NAT, WAN selection,
+    final disposition, configuration generation, NOT_PERFORMED states
+
+Trust / Identity Journal
+    appliance enrollment, peer authorization, certificate rotation,
+    revocation, trust failures, unknown/rejected peers
+
+Time / Clock Journal
+    synchronization state, source health, offset changes,
+    clock corrections, holdover and fault transitions
+
+Hunter Processing Journal
+    receipt, verification, commit, indexing, reprocessing,
+    derived export creation and other Hunter processing transitions
+```
+
+These journals are logically separate even if a future storage engine shares underlying infrastructure.
+
+Committed journal entries are append-oriented. A prior entry is not silently edited to make current state look cleaner. Corrections, superseding interpretations, recovery, retention actions, and later success after failure are represented by new entries.
+
+Critical journals should support integrity chaining/tamper detection; the exact cryptographic journal contract remains to be frozen. PCAP integrity remains segment-oriented rather than requiring a hash chain over every individual packet.
+
+Stronghold should explicitly preserve states such as `NOT_PERFORMED`. For example, traffic denied at the authorization gate should be able to show that routing and NAT were deliberately not performed.
+
+Net-Hunter preserves source FW journal identity/ordering and appends its own Hunter-side journal entries; it does not rewrite the originating FW history.
+
+## FW storage direction
 
 ```text
 RAM buffer / capture ring
@@ -246,19 +362,7 @@ Current physical link direction:
 
 The history-link speed is independent of the validated Stronghold FW forwarding/capture dataplane rating. A 25 GbE or 40 GbE history interface does not constitute a claim that the firewall dataplane itself has been validated at that rate.
 
-Completed FW capture segments and their associated records are transferred to Net-Hunter only after required local finalization and integrity work. Net-Hunter independently verifies received history before acknowledging it as committed.
-
-## Records
-
-Raw PCAPNG is the authoritative packet history. Structured records make that history searchable, explainable, and correlatable.
-
-Stronghold FW should create initial records that can be established while traffic is live, including physical-interface observation, ingress/egress context, timestamps, MAC/VLAN context, bridge-domain context, flow/session facts, protocol/control-plane facts when safely decoded, authorization decisions, Layer-2 forwarding decisions, Layer-3 routing decisions, firewall decisions, NAT decisions, WAN-selection decisions, packet-loss state, configuration generation, and system/failure activity.
-
-Stronghold must preserve the distinction between physical observation and forwarding disposition. A firewall DROP/REJECT decision must not suppress authoritative ingress capture.
-
-Stronghold Net-Hunter may later enrich, correlate, and reprocess historical PCAP with improved decoders.
-
-Failure to recognize or decode a protocol must never cause the underlying packet to be discarded.
+Completed FW capture segments and associated journals/records are transferred to Net-Hunter only after required local finalization and integrity work. Net-Hunter independently verifies received history before acknowledging it as committed.
 
 ## Stronghold Net-Hunter
 
@@ -280,20 +384,20 @@ The FreeBSD host owns hardware, HBAs, ZFS pools/datasets, host networking, PF, j
 
 Net-Hunter currently has four defined application jails:
 
-1. **PCAP Data Ingest Jail** — receives capture segments and initial records from authorized Stronghold FW appliances, verifies transfer integrity/completeness, commits received history, and acknowledges verified receipt.
-2. **Record Processing Jail** — reads authoritative PCAP and FW records, constructs and enriches searchable records, correlates network/firewall history, builds indexes, and may reprocess older PCAP when decoders improve.
-3. **External User Interface Jail** — provides hunt, query, timeline, correlation, viewing, reporting, and controlled export. Authoritative Stronghold traffic history and records are read-only from this jail.
+1. **PCAP Data Ingest Jail** — receives capture segments, source journals, and initial records from explicitly authorized Stronghold FW appliances; verifies transfer integrity/completeness; commits received history; and acknowledges verified receipt.
+2. **Record Processing Jail** — reads authoritative PCAP and FW history, constructs and enriches searchable records, correlates network/firewall history, builds indexes, and may reprocess older PCAP when decoders improve.
+3. **External User Interface Jail** — provides hunt, query, timeline, correlation, viewing, reporting, and controlled export. Authoritative Stronghold traffic history, journals, and records are read-only from this jail.
 4. **FW Configuration Backup Jail** — receives and preserves versioned Stronghold FW configuration backups. Access is restricted to authorized Stronghold FW appliances and a local Net-Hunter administrator; ordinary hunt/UI users and the other application jails do not receive access.
 
 ### External UI read-only invariant
 
-> **The External User Interface may query, interpret, correlate, display, and export Stronghold history, but it may not alter authoritative PCAP, observation records, processed records, indexes, or firewall configuration history.**
+> **The External User Interface may query, interpret, correlate, display, and export Stronghold history, but it may not alter authoritative PCAP, source journals, observation records, processed records, indexes, or firewall configuration history.**
 
-Writable UI storage, when required, is limited to non-authoritative material such as temporary session state, derived exports, reports, and download staging.
+Writable UI storage, when required, is limited to non-authoritative material such as temporary session state, derived exports, reports, investigation notes, and download staging. User-created material becomes new non-authoritative history; it does not mutate the source record it references.
 
 ## Current Engineering Scope
 
-The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
+The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
 
 Later networking/enforcement phase sequencing is intentionally not frozen yet.
 
