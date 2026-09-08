@@ -1,0 +1,35 @@
+# Build output
+bin/
+build/
+dist/
+*.out
+*.test
+
+# Go
+/go/stronghold
+/go/coverage.out
+
+# Local runtime / capture data
+capture/
+pcap/
+*.pcap
+*.pcapng
+*.pcap.zst
+*.pcapng.zst
+*.db
+*.db-shm
+*.db-wal
+
+# Local configuration and secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
