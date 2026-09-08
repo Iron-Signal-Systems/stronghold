@@ -18,14 +18,23 @@ Stronghold engineering must preserve truthful packet observation, explicit packe
 
 Prefer work that improves, in order:
 
-1. packet capture correctness;
-2. truthful loss accounting;
-3. durable local capture;
-4. integrity;
-5. explainability;
-6. failure behavior;
-7. operational simplicity; and
-8. downstream processing.
+1. Wireshark-class visibility on configured physical interfaces;
+2. packet capture correctness;
+3. truthful loss accounting;
+4. durable local capture;
+5. integrity;
+6. explainability;
+7. failure behavior;
+8. operational simplicity; and
+9. downstream processing.
+
+The first capture requirement is explicit:
+
+> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, routes, or firewall-processes it.**
+
+A supported capture path should provide the same class of interface visibility expected from Wireshark/dumpcap operating on the same supported physical interface under the same conditions.
+
+Unknown EtherTypes, unknown IP protocols, malformed traffic, vendor-specific frames, and non-routable Layer-2/control-plane traffic are not discarded merely because Stronghold does not understand them.
 
 Live packet capture and active durable PCAP writes take priority over compression, tier migration, remote offload, indexing, analytics, and other background work.
 
@@ -112,6 +121,18 @@ When implementation conflicts with an existing contract:
 Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, integrity verification, storage migration safety, retention behavior, or offload provenance.
 
 ## Capture Rules
+
+### Capture Requirement #1 — Wireshark-class interface visibility
+
+The authoritative capture point is the configured supported physical interface.
+
+If traffic is presented to that interface and observable through the supported NIC/driver capture path, Stronghold records it without first requiring protocol recognition, decoding, routability, or firewall relevance.
+
+This includes, when presented to the interface, ordinary IP traffic and Layer-2/control-plane traffic such as ARP, DHCP, DHCPv6, CDP, LLDP, STP/RSTP/MSTP, LACP, 802.1X/EAPOL, OSPF, VRRP, IGMP, IPv6 NDP, VLAN-tagged traffic, unknown EtherTypes, unknown IP protocols, vendor-specific frames, and malformed traffic.
+
+Stronghold must not claim to have observed traffic that the NIC, upstream topology, hardware filtering, or driver did not present to the supported capture path.
+
+Wireshark/dumpcap on the same supported physical interface under the same conditions is the reference visibility baseline for Phase 0 validation.
 
 The authoritative configured capture stream is not filtered merely because downstream retention or offload selects a subset of traffic.
 
@@ -223,6 +244,7 @@ Permission for one repository write applies only to the specifically approved ac
 Before proposing a change as complete:
 
 - compare the implementation against the applicable roadmap and architecture;
+- verify Wireshark-class interface visibility has not been narrowed;
 - verify that capture priority has not been weakened;
 - verify packet-loss and degraded states remain truthful;
 - verify durability and migration behavior remain explicit;
