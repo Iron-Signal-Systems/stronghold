@@ -4,13 +4,17 @@
 
 This file defines how contributors, coding agents, and automation should work within the Stronghold repository.
 
-It is an engineering map and behavioral contract. It does not replace the architecture and implementation contracts under `docs/`.
+It is an engineering map and behavioral contract. It does not replace architecture and implementation contracts under `docs/`.
 
-Stronghold is built around one governing principle:
+Stronghold is built around these governing principles:
 
 > **Capture first. Never sacrifice observation for secondary work.**
 
-Stronghold engineering must preserve truthful packet observation, explicit packet-loss accounting, durable capture semantics, clear failure behavior, operational simplicity, and the trust boundaries between Stronghold FW and Stronghold Net-Hunter.
+> **Denied traffic should be cheap to reject, but never invisible.**
+
+> **Path availability is not path permission.**
+
+Stronghold engineering must preserve truthful packet observation, explicit packet-loss accounting, durable capture semantics, authorization-first forwarding behavior, clear failure behavior, operational simplicity, and the trust boundaries between Stronghold FW and Stronghold Net-Hunter.
 
 ## Product Model
 
@@ -23,6 +27,7 @@ Stronghold FW runs on Arch Linux and owns live-network responsibilities:
 ```text
 observe
 record
+authorize
 bridge and/or route
 enforce
 maintain local history backlog
@@ -59,10 +64,11 @@ Prefer work that improves, in order:
 4. durable local capture;
 5. integrity;
 6. comprehensive records;
-7. explainability;
-8. failure behavior;
-9. operational simplicity; and
-10. downstream processing.
+7. authorization/enforcement correctness;
+8. explainability;
+9. failure behavior;
+10. operational simplicity; and
+11. downstream processing.
 
 The first capture requirement is explicit:
 
@@ -80,7 +86,7 @@ Secondary work may throttle, pause, or fall behind. Stronghold must not delibera
 
 Raw PCAPNG is the authoritative packet history.
 
-Structured observation, flow, protocol, bridge, firewall, routing, NAT, system, and failure records exist to explain, correlate, locate, and make the authoritative packet history usable.
+Structured observation, authorization, flow, protocol, bridge, firewall, routing, NAT, WAN-selection, system, configuration, and failure records exist to explain, correlate, locate, and make the authoritative packet history usable.
 
 Failure to recognize, decode, enrich, index, or correlate traffic must not cause the underlying packet to be discarded.
 
@@ -90,11 +96,38 @@ Absence of a decoded record is not proof that the corresponding traffic did not 
 
 Stronghold must preserve the distinction between what a physical interface observed and what the appliance later did with the traffic.
 
-Do not collapse ingress observation, bridge forwarding, route selection, firewall action, NAT, egress interface, and egress VLAN into one ambiguous event.
+Do not collapse ingress observation, authorization, bridge forwarding, route selection, firewall action, NAT, WAN selection, egress interface, and egress VLAN into one ambiguous event.
 
 Router-on-a-stick traffic may enter and leave the same physical interface under different VLAN contexts. Preserve the correlation without pretending the observations are unrelated traffic.
 
 A DROP or REJECT disposition must not by itself suppress authoritative ingress capture.
+
+### Authorization before normal forwarding work
+
+A packet must not enter normal routing/NAT/deeper-forwarding work merely because a viable route exists.
+
+Stronghold semantics are:
+
+```text
+observe / capture
+    ↓
+early authorization
+    ├── explicit deny → drop
+    ├── no explicit allow → default drop
+    └── authorized to proceed
+             ↓
+          routing
+             ↓
+      NAT/state/deeper work
+             ↓
+          final egress
+```
+
+Reject clearly unauthorized traffic as early and cheaply as practical on the qualified dataplane without weakening capture visibility or correctness.
+
+Do not let the existence of a route, NAT rule, FQDN association, or WAN path grant security permission.
+
+For Layer-7 policy, `authorized_to_continue_processing` is not equivalent to `final_allow`. Do not report a final Layer-7 allow until the required Layer-7 fact has actually been established.
 
 ### Report only what Stronghold can establish
 
@@ -120,13 +153,13 @@ Do not infer a positive state from the absence of an error.
 
 Do not report a packet as durably captured merely because it reached RAM or because a write call returned successfully.
 
-Packet drops, capture gaps, record/index lag, Net-Hunter transfer backlog, storage pressure, and verification failures must remain observable.
+Packet drops, capture gaps, record/index lag, Net-Hunter transfer backlog, storage pressure, route failures, WAN degradation, configuration failures, and verification failures must remain observable.
 
 ### Simple does not mean vague
 
 Stronghold should remain operationally simple while retaining authoritative technical detail.
 
-Do not hide Linux, FreeBSD, NIC, packet-capture, bridge, routing, firewall, filesystem, ZFS, jail, storage, or failure behavior behind vague abstractions.
+Do not hide Linux, FreeBSD, NIC, packet-capture, bridge, routing, firewall, nftables/netfilter, filesystem, ZFS, jail, storage, or failure behavior behind vague abstractions.
 
 ### Prefer explicit engineering
 
@@ -138,8 +171,6 @@ Implement the requirement that exists now.
 
 ## Sources of Truth
 
-Read the applicable documents before changing implementation behavior.
-
 ### Phase scope and sequence
 
 `docs/ROADMAP.md` defines current implementation phase scope, sequencing, targets, and exit gates.
@@ -148,7 +179,7 @@ The broader architecture may be documented before its implementation phase begin
 
 ### Architecture invariants
 
-`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, networking, storage, history-transfer, jail, and trust-boundary architecture.
+`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, networking, policy, routing, storage, history-transfer, jail, configuration, and trust-boundary architecture.
 
 Future dedicated contracts may refine implementation details without silently weakening these invariants.
 
@@ -156,7 +187,7 @@ Future dedicated contracts may refine implementation details without silently we
 
 Work only within the current roadmap phase and current engineering slice unless explicitly directed otherwise.
 
-Stronghold begins implementation with the FW capture foundation. Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, or other future systems into the current phase unless explicitly approved.
+Stronghold begins implementation with the FW capture foundation. Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, NAT, adaptive WAN selection, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, VRF, or other future systems into the current phase unless explicitly approved.
 
 Future compatibility may be preserved where useful, but future features should not be implemented early without a concrete current requirement.
 
@@ -174,7 +205,7 @@ When implementation conflicts with an existing contract:
 4. surface the issue explicitly; and
 5. resolve the discrepancy intentionally before continuing through that boundary.
 
-Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, record completeness, interface/VLAN identity, forwarding-disposition traceability, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, retention behavior, or lineage/provenance.
+Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, record completeness, authorization-before-routing behavior, policy ordering, default-deny behavior, interface/VLAN identity, forwarding-disposition traceability, route-selection rules, WAN eligibility, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, retention behavior, or lineage/provenance.
 
 ## Stronghold FW Rules
 
@@ -215,8 +246,6 @@ Do not introduce a global forwarding-mode abstraction that unnecessarily forces 
 
 Layer-2 forwarding belongs to explicit bridge-domain context. Layer-3 termination belongs to explicit logical-interface context.
 
-Connected and static routing are the initial intended routing direction. Dynamic routing remains future work unless explicitly approved.
-
 ### FW network objects
 
 VLAN is a first-class Stronghold object.
@@ -225,7 +254,28 @@ Do not represent VLAN meaning only as an anonymous integer buried in a Linux sub
 
 Records and configuration must preserve both Stronghold object identity and the actual 802.1Q VLAN ID.
 
-The architecture also anticipates explicit physical-interface, logical-interface, bridge-domain, zone, host, network, address-group, service, service-group, FQDN, and FQDN-group objects. Exact schemas must be defined before implementation is treated as complete.
+The architecture also anticipates explicit physical-interface, logical-interface, bridge-domain, zone, host, network, address-group, service, service-group, FQDN, FQDN-group, route, security-policy, NAT-policy, and WAN-preference objects.
+
+Exact schemas must be defined before implementation is treated as complete.
+
+### Zones and interface roles
+
+One routed logical interface belongs to one security zone. A zone may contain multiple logical interfaces or VLANs.
+
+Current interface roles are:
+
+```text
+PRODUCTION
+WAN
+MANAGEMENT
+HISTORY
+```
+
+`MANAGEMENT` and `HISTORY` are not ordinary production transit roles.
+
+Reject configurations that violate these boundaries, including using HISTORY as a production default/alternate route or placing MANAGEMENT into a production bridge domain.
+
+Do not infer security-zone identity solely from a physical-interface role.
 
 ### FQDN truthfulness
 
@@ -235,7 +285,201 @@ Do not claim that a connection used a hostname merely because its destination IP
 
 When Layer-7 hostname information is later supported, preserve the source of that knowledge, such as TLS SNI, HTTP Host, DNS correlation, or `not_observed`.
 
-### FW storage direction
+## Security Policy Rules
+
+### Default deny
+
+Stronghold is explicit-allow and default-deny for Layer-2 forwarding, Layer-3/4 forwarding, and traffic destined to the appliance itself.
+
+The built-in unmatched disposition is DROP.
+
+### Rule evaluation order
+
+Rules are evaluated from the lowest current integer position to the highest.
+
+First match wins for the applicable policy domain.
+
+Early explicit deny rules are permitted and encouraged when they allow unwanted traffic to be rejected before unnecessary downstream work.
+
+### Dense mutable positions
+
+Rule positions are dense mutable integers:
+
+```text
+1
+2
+3
+...
+N
+```
+
+If a new rule is inserted at an occupied position, the new rule takes that position and the existing rule plus every following rule shifts down while preserving relative order.
+
+Moving a rule similarly shifts the affected range.
+
+Do not use sparse `10,20,30...` numbering as an architectural requirement.
+
+### Policy ID is reference only
+
+Policy ID is a stable reference identity only.
+
+It does NOT determine:
+
+```text
+priority
+rule order
+rule position
+action
+```
+
+Decision records must preserve the policy ID, policy name at decision time, rule position at decision time, configuration generation, and action.
+
+Do not silently use Policy ID sort order as policy evaluation order.
+
+## Routing Rules
+
+Only authorized traffic enters normal Stronghold route selection.
+
+Route selection order is:
+
+```text
+1. longest-prefix match
+2. for equal-prefix candidates:
+       STATIC
+       CONNECTED
+       DEFAULT
+       DYNAMIC
+3. health / availability
+4. metric
+5. deterministic tie-break
+```
+
+A more-specific prefix always wins over a less-specific prefix. Do not let route-source preference override longest-prefix matching.
+
+For example, `10.12.12.3/32` must win over `10.12.12.0/24` for destination `10.12.12.3`.
+
+Routing does not grant security permission.
+
+An ALLOW followed by `NO_ROUTE` results in final DROP with routing failure recorded separately from policy denial.
+
+Dynamic routing remains future work unless explicitly approved.
+
+VRF is future capability, not initial scope. Initial routing uses one default routing domain, but implementation models should not bake in assumptions that make future routing-domain/VRF support require a redesign.
+
+## Multi-WAN Rules
+
+Stronghold multi-WAN behavior is preference-driven, not generic load balancing.
+
+### Explicit eligibility
+
+A destination/service must explicitly define which WANs are allowed.
+
+Do not assume an alternate WAN is permitted merely because it is up, fast, or routable.
+
+### Preference behavior
+
+The architecture anticipates:
+
+```text
+FIXED
+PRIMARY/FALLBACK
+SCHEDULED
+ADAPTIVE
+```
+
+Adaptive selection may use an explicitly allowed alternate for **new flows** when destination-specific path quality shows that the preferred WAN has degraded.
+
+Relevant path-quality inputs may include reachability, RTT, loss, and jitter.
+
+Use thresholds and hysteresis to prevent rapid path flapping.
+
+Do not globally mark a WAN bad for every destination merely because one configured destination performs poorly through it.
+
+Established sessions normally remain bound to their established WAN/NAT identity unless the path fails.
+
+Do not claim seamless session migration where the external identity/protocol cannot actually survive the change.
+
+## NAT Rules
+
+NAT is a separate policy domain from security authorization.
+
+The existence of a NAT rule must never create security permission.
+
+Intended NAT capabilities include masquerade, static SNAT, DNAT/port forwarding, static 1:1 NAT, and NAT exemption/no-NAT.
+
+Preserve original and translated source/destination addressing separately in records.
+
+NAT must remain consistent with selected WAN, route, and connection state as applicable.
+
+Do not treat IPv6 translation behavior as identical to IPv4 by default; NAT66/NPTv6 remain deliberate future decisions.
+
+## Configuration Management Rules
+
+Stronghold owns its appliance configuration.
+
+### Candidate and running configuration
+
+Use the model:
+
+```text
+RUNNING
+  ↓
+CANDIDATE
+  ↓
+VALIDATE
+  ↓
+SHOW DIFF
+  ↓
+COMMIT
+  ↓
+NEW GENERATION
+```
+
+Candidate changes must not affect live traffic before commit.
+
+### Validation
+
+Validation must cover whole-configuration semantics, not just syntax.
+
+Reject invalid references, unsafe interface-role use, invalid routing/NAT relationships, invalid VLAN relationships, duplicate/invalid addressing, and any change that violates hard architecture boundaries.
+
+When policy insertion/movement reorders rules, expose the resulting order in the candidate/diff rather than hiding it.
+
+### Configuration generations
+
+Each successful commit creates a monotonically advancing configuration generation representing the complete effective configuration.
+
+Runtime decision records should reference the applicable generation.
+
+Stable IDs remain stable across generations even when mutable positions/values change.
+
+### Coordinated activation
+
+Prepare and validate required native Linux state before activation.
+
+Apply the new generation through the narrowest coordinated/atomic transition practical for the underlying components.
+
+Where literal whole-system atomicity is impossible, document and test the real transition boundary instead of pretending it is atomic.
+
+### Commit-confirmed
+
+Management-affecting/high-risk remote changes should support commit-confirmed protection and automatic rollback when not confirmed.
+
+The local physical console remains an appliance recovery path.
+
+### Rollback
+
+Rollback to old content creates a **new configuration generation** based on that historical content.
+
+Do not rewrite or reuse old generation identity as though history moved backward.
+
+### Configuration backup
+
+Successful committed generations are intended to be preserved as versioned backups in the isolated Net-Hunter FW Configuration Backup Jail.
+
+Failed validation, commit, activation, and rollback attempts should produce durable system/administrative records.
+
+## FW Storage Direction
 
 The current preferred FW storage model is:
 
@@ -250,7 +494,7 @@ PCAP storage must not share the root filesystem in a way that allows capture exh
 
 Long-term HDD/RAID history belongs to Net-Hunter rather than the live firewall.
 
-### Net-Hunter independence
+## Net-Hunter Independence
 
 Net-Hunter unavailability must not stop Stronghold FW capture, bridging, routing, or firewall enforcement while local FW resources remain capable of operating.
 
@@ -291,11 +535,9 @@ Do not give application jails raw host, HBA, disk, or ZFS-pool administration me
 
 ## Net-Hunter Jail Rules
 
-The current application-jail architecture has four roles.
-
 ### PCAP Data Ingest Jail
 
-The ingest jail receives finalized PCAP segments and associated initial records from authorized Stronghold FW appliances.
+Receives finalized PCAP segments and associated initial records from authorized Stronghold FW appliances.
 
 It may perform source authentication, transfer-completeness checks, integrity verification, commit work, and verified receipt acknowledgement.
 
@@ -303,7 +545,7 @@ It does not provide external hunt/query user access.
 
 ### Record Processing Jail
 
-The record-processing jail reads authoritative PCAP and initial FW records and produces/enriches searchable records and indexes.
+Reads authoritative PCAP and initial FW records and produces/enriches searchable records and indexes.
 
 It may reprocess historical PCAP when future decoders improve.
 
@@ -342,13 +584,13 @@ modify FW configuration backups
 modify Stronghold FW policy/configuration through the hunt interface
 ```
 
-Writable UI storage is limited to non-authoritative material such as session state, temporary query work, derived PCAP exports, reports, and download staging.
+Writable UI storage is limited to non-authoritative session state, temporary query work, derived PCAP exports, reports, and download staging.
 
 A derived export is not authoritative Stronghold history.
 
 ### FW Configuration Backup Jail
 
-The FW Configuration Backup jail preserves versioned Stronghold FW configuration backups.
+Preserves versioned Stronghold FW configuration backups.
 
 Its normal access boundary is limited to:
 
@@ -367,7 +609,7 @@ The exact secret-handling and restore-authorization contract must be defined bef
 
 Failure behavior is part of the product.
 
-For capture-sensitive, durability-sensitive, destructive, privileged, or security-sensitive operations, implement and test failure paths at the same time as successful paths.
+For capture-sensitive, durability-sensitive, forwarding-sensitive, configuration-sensitive, destructive, privileged, or security-sensitive operations, implement and test failure paths at the same time as successful paths.
 
 Examples include:
 
@@ -395,7 +637,14 @@ jail unavailable
 ZFS storage degradation
 bridge failure
 route application failure
+no-route disposition
+WAN path degradation
+WAN health-state transition
 firewall policy application failure
+candidate validation failure
+configuration activation failure
+commit-confirmed timeout
+rollback failure
 ```
 
 A failed verification is still a factual verification result.
@@ -452,14 +701,21 @@ Permission for one repository write applies only to the specifically approved ac
 
 Before proposing a change as complete:
 
-- compare the implementation against the applicable roadmap and architecture;
+- compare implementation against the applicable roadmap and architecture;
 - verify Wireshark-class interface visibility has not been narrowed;
 - verify capture priority has not been weakened;
 - verify raw PCAP authority remains intact;
 - verify packet-loss and degraded states remain truthful;
+- verify unauthorized traffic cannot silently gain routing/NAT work merely because a route exists;
+- verify default-deny and rule-order semantics remain intact;
+- verify Policy ID is not used as rule priority/order;
+- verify longest-prefix routing precedes route-source preference;
+- verify WAN alternates are explicitly authorized rather than assumed;
 - verify records do not silently substitute inference for observation;
-- verify physical observation remains distinguishable from bridge/route/firewall/NAT disposition;
+- verify physical observation remains distinguishable from authorization/bridge/route/firewall/NAT/WAN disposition;
 - verify VLAN and interface identities are preserved explicitly;
+- verify MANAGEMENT and HISTORY are not production transit paths;
+- verify configuration generation/rollback semantics remain monotonic and auditable;
 - verify durability and transfer behavior remain explicit;
 - verify Net-Hunter is not accidentally introduced into the live FW dependency path;
 - verify External UI authoritative-data access remains read-only;
@@ -473,7 +729,7 @@ Before proposing a change as complete:
 
 More specific directories may contain their own `AGENTS.md`.
 
-A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, networking identity, Net-Hunter isolation, UI read-only, configuration-backup, or repository-operation requirements.
+A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, authorization, policy-ordering, routing, WAN eligibility, networking identity, Net-Hunter isolation, UI read-only, configuration-backup, or repository-operation requirements.
 
 Current nested engineering standard:
 
