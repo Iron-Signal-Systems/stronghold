@@ -72,11 +72,25 @@ Long-term HDD/RAID history storage belongs to Net-Hunter rather than the live fi
 
 Define high-water, urgent, and critical storage-pressure behavior for the FW HOT/WARM tiers.
 
+Phase 0 storage-pressure behavior must preserve these architectural rules:
+
+```text
+NORMAL / HIGH / URGENT / CRITICAL state is observable
+pressure may throttle/pause secondary work
+pressure may accelerate safe tier movement/transfer
+acknowledged history is safer to expire locally than unacknowledged history
+pressure does not silently invent emergency deletion authority
+unacknowledged authoritative history is not automatically deleted by default
+storage exhaustion creates a truthful capture/history gap if durable capture cannot continue
+```
+
 Define what happens while Net-Hunter is unavailable, including backlog accounting, oldest-pending history, and explicit degraded-state reporting.
 
 RAM is never classified as durable capture storage.
 
 The operating-system filesystem and PCAP filesystems must remain separated so capture-storage exhaustion cannot silently exhaust the root filesystem.
+
+Full customer retention classes, legal/investigative holds, manual destruction workflows, and archive administration remain later work; Phase 0 must simply avoid a storage model that contradicts those future controls.
 
 ### 0.5 Capture resource-protection contract
 
@@ -95,7 +109,7 @@ Freeze the workload priority:
 
 Define the measurements that throttle or pause secondary work, including capture-ring occupancy, packet drops, CPU load, memory pressure, NVMe write latency/queue pressure, storage pressure, and transfer backlog.
 
-Future journal work must obey the same resource rule: authoritative live capture may not be sacrificed merely to keep secondary journal transfer, enrichment, indexing, or analytics current.
+Future journal/retention work must obey the same resource rule: authoritative live capture may not be sacrificed merely to keep secondary journal transfer, enrichment, indexing, analytics, or retention processing current.
 
 ### 0.6 Single-interface capture prototype
 
@@ -116,7 +130,7 @@ Arch Linux x86_64
 
 The prototype must capture observable traffic without protocol allowlisting.
 
-No compression, local tier movement, Net-Hunter transfer, routing, firewall code, remote identity integration, PKI enrollment, or complete journal subsystem is required for this slice.
+No compression, local tier movement, Net-Hunter transfer, routing, firewall code, remote identity integration, PKI enrollment, complete journal subsystem, or complete retention/hold subsystem is required for this slice.
 
 ### 0.7 Multi-interface capture
 
@@ -198,7 +212,7 @@ FW finalized segment
     -> transfer over dedicated Stronghold history path
     -> Net-Hunter receive/finalize
     -> Net-Hunter independently verify
-    -> Net-Hunter commit
+    -> Net-Hunter durably commit
     -> Net-Hunter acknowledge verified receipt
     -> FW record acknowledgement
 ```
@@ -209,15 +223,19 @@ Net-Hunter unavailability must create an observable backlog/degraded condition w
 
 A source segment must not be deleted merely because a network copy call returned successfully.
 
+Net-Hunter must not ACK history that has not completed the required destination finalization, verification, and durable commit boundary, including when Hunter storage is under pressure or near exhaustion.
+
+If Hunter cannot commit, the FW retains backlog locally according to the storage contract.
+
 The exact transfer protocol, Stronghold appliance PKI/enrollment details, peer-authorization mechanics, journal-batch transfer mechanics, retry/backoff behavior, and source/destination journal integrity contracts remain to be frozen before their applicable engineering slices are implemented.
 
 ## Phase 0 Exit Gate
 
 Phase 0 is not complete until Stronghold can demonstrate, on representative supported hardware, that it can continuously capture configured interfaces for an extended period and truthfully answer:
 
-> **What did the hardware present to Stronghold, what did Stronghold durably capture, what—if anything—was dropped, where are the packets now, what history is pending transfer, what has Net-Hunter independently verified, and can the relevant traffic be found/exported without compromising ongoing capture?**
+> **What did the hardware present to Stronghold, what did Stronghold durably capture, what—if anything—was dropped, where are the packets now, what history is pending transfer, what has Net-Hunter independently verified/committed, and can the relevant traffic be found/exported without compromising ongoing capture?**
 
-The exit gate must include documented Wireshark/dumpcap reference visibility, Layer-2/control-plane capture behavior, resource/load behavior, loss accounting, interrupted-operation recovery, storage-pressure behavior, local tier-movement verification, Net-Hunter outage/backlog behavior, and verified history-handoff behavior.
+The exit gate must include documented Wireshark/dumpcap reference visibility, Layer-2/control-plane capture behavior, resource/load behavior, loss accounting, interrupted-operation recovery, storage-pressure behavior, local tier-movement verification, Net-Hunter outage/backlog behavior, destination-full behavior, and verified history-handoff behavior.
 
 ## Later Phases
 
@@ -243,10 +261,17 @@ mTLS FW↔Net-Hunter history trust
 explicit peer authorization/revocation
 UTC/monotonic clock and clock-confidence handling
 separate append-oriented journals
+independent PCAP/journal retention policies
+legal/investigative/administrative holds
+controlled and journaled destruction
+future archive lifecycle
+Net-Hunter capacity forecasting/pressure handling
 complete Net-Hunter processing/hunt system
 ```
 
 The intended journal domains are separate Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, and Hunter Processing journals. They are not one generic mutable logfile. Exact schemas, durability boundaries, cryptographic advancement/integrity mechanisms, transfer batching, and retention contracts remain future engineering work.
+
+Retention eligibility is not destruction authority. Holds override normal expiration, and storage pressure must not silently create a destructive policy or cause Hunter to ACK history it did not durably commit.
 
 The exact implementation phase sequence for those later capabilities is intentionally **not frozen yet**. The complete product architecture is still being defined before the later roadmap is decomposed into implementation gates.
 
