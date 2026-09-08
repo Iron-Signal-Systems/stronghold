@@ -23,7 +23,7 @@ Stronghold FW runs on Arch Linux and owns live-network responsibilities:
 ```text
 observe
 record
-route
+bridge and/or route
 enforce
 maintain local history backlog
 transfer verified history to Net-Hunter
@@ -45,7 +45,7 @@ export
 preserve FW configuration backups
 ```
 
-Net-Hunter must never become a runtime dependency for Stronghold FW capture, routing, or firewall enforcement.
+Net-Hunter must never become a runtime dependency for Stronghold FW capture, bridging, routing, or firewall enforcement.
 
 ## Product Engineering Principles
 
@@ -66,7 +66,7 @@ Prefer work that improves, in order:
 
 The first capture requirement is explicit:
 
-> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, routes, or firewall-processes it.**
+> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
 
 A supported capture path should provide the same class of interface visibility expected from Wireshark/dumpcap operating on the same supported physical interface under the same conditions.
 
@@ -80,11 +80,21 @@ Secondary work may throttle, pause, or fall behind. Stronghold must not delibera
 
 Raw PCAPNG is the authoritative packet history.
 
-Structured observation, flow, protocol, firewall, routing, NAT, system, and failure records exist to explain, correlate, locate, and make the authoritative packet history usable.
+Structured observation, flow, protocol, bridge, firewall, routing, NAT, system, and failure records exist to explain, correlate, locate, and make the authoritative packet history usable.
 
 Failure to recognize, decode, enrich, index, or correlate traffic must not cause the underlying packet to be discarded.
 
 Absence of a decoded record is not proof that the corresponding traffic did not exist.
+
+### Observation and disposition are different facts
+
+Stronghold must preserve the distinction between what a physical interface observed and what the appliance later did with the traffic.
+
+Do not collapse ingress observation, bridge forwarding, route selection, firewall action, NAT, egress interface, and egress VLAN into one ambiguous event.
+
+Router-on-a-stick traffic may enter and leave the same physical interface under different VLAN contexts. Preserve the correlation without pretending the observations are unrelated traffic.
+
+A DROP or REJECT disposition must not by itself suppress authoritative ingress capture.
 
 ### Report only what Stronghold can establish
 
@@ -116,7 +126,7 @@ Packet drops, capture gaps, record/index lag, Net-Hunter transfer backlog, stora
 
 Stronghold should remain operationally simple while retaining authoritative technical detail.
 
-Do not hide Linux, FreeBSD, NIC, packet-capture, filesystem, ZFS, jail, storage, or failure behavior behind vague abstractions.
+Do not hide Linux, FreeBSD, NIC, packet-capture, bridge, routing, firewall, filesystem, ZFS, jail, storage, or failure behavior behind vague abstractions.
 
 ### Prefer explicit engineering
 
@@ -138,7 +148,7 @@ The broader architecture may be documented before its implementation phase begin
 
 ### Architecture invariants
 
-`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, storage, history-transfer, jail, and trust-boundary architecture.
+`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, networking, storage, history-transfer, jail, and trust-boundary architecture.
 
 Future dedicated contracts may refine implementation details without silently weakening these invariants.
 
@@ -146,7 +156,7 @@ Future dedicated contracts may refine implementation details without silently we
 
 Work only within the current roadmap phase and current engineering slice unless explicitly directed otherwise.
 
-Stronghold begins implementation with the FW capture foundation. Do not pull routing, nftables enforcement, FQDN policy, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, or other future systems into the current phase unless explicitly approved.
+Stronghold begins implementation with the FW capture foundation. Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, or other future systems into the current phase unless explicitly approved.
 
 Future compatibility may be preserved where useful, but future features should not be implemented early without a concrete current requirement.
 
@@ -164,7 +174,7 @@ When implementation conflicts with an existing contract:
 4. surface the issue explicitly; and
 5. resolve the discrepancy intentionally before continuing through that boundary.
 
-Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, record completeness, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, retention behavior, or lineage/provenance.
+Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, record completeness, interface/VLAN identity, forwarding-disposition traceability, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, retention behavior, or lineage/provenance.
 
 ## Stronghold FW Rules
 
@@ -172,7 +182,7 @@ Do not silently weaken capture completeness claims, packet-loss accounting, dura
 
 The authoritative capture point is the configured supported physical interface.
 
-If traffic is presented to that interface and observable through the supported NIC/driver capture path, Stronghold records it without first requiring protocol recognition, decoding, routability, or firewall relevance.
+If traffic is presented to that interface and observable through the supported NIC/driver capture path, Stronghold records it without first requiring protocol recognition, decoding, routability, bridge relevance, or firewall relevance.
 
 This includes, when presented to the interface, ordinary IP traffic and Layer-2/control-plane traffic such as ARP, DHCP, DHCPv6, CDP, LLDP, STP/RSTP/MSTP, LACP, 802.1X/EAPOL, OSPF, VRRP, IGMP, IPv6 NDP, VLAN-tagged traffic, unknown EtherTypes, unknown IP protocols, vendor-specific frames, and malformed traffic.
 
@@ -180,13 +190,50 @@ Stronghold must not claim to have observed traffic that the NIC, upstream topolo
 
 Wireshark/dumpcap on the same supported physical interface under the same conditions is the reference visibility baseline for capture validation.
 
-The authoritative configured capture stream is not filtered merely because downstream retention, transfer, or processing selects a subset of traffic.
+The authoritative configured capture stream is not filtered merely because downstream retention, transfer, forwarding, or processing selects a subset of traffic.
 
 RAM is buffering only and is not durable capture storage.
 
 The initial preferred packet-acquisition direction is Linux AF_PACKET with TPACKET_V3 unless measurement or a later approved contract requires another source.
 
 Any capture-source abstraction must be justified by a real implementation boundary rather than speculative portability.
+
+### FW networking model
+
+Stronghold FW may support different forwarding models on different configured portions of the same appliance.
+
+Architecturally supported models include:
+
+```text
+Layer-2 transparent bridging
+Layer-3 IPv4/IPv6 routing
+router-on-a-stick over 802.1Q trunks
+hybrid deployments combining Layer 2 and Layer 3 behavior
+```
+
+Do not introduce a global forwarding-mode abstraction that unnecessarily forces all interfaces/VLANs into the same mode.
+
+Layer-2 forwarding belongs to explicit bridge-domain context. Layer-3 termination belongs to explicit logical-interface context.
+
+Connected and static routing are the initial intended routing direction. Dynamic routing remains future work unless explicitly approved.
+
+### FW network objects
+
+VLAN is a first-class Stronghold object.
+
+Do not represent VLAN meaning only as an anonymous integer buried in a Linux subinterface name.
+
+Records and configuration must preserve both Stronghold object identity and the actual 802.1Q VLAN ID.
+
+The architecture also anticipates explicit physical-interface, logical-interface, bridge-domain, zone, host, network, address-group, service, service-group, FQDN, and FQDN-group objects. Exact schemas must be defined before implementation is treated as complete.
+
+### FQDN truthfulness
+
+DNS-backed FQDN policy and directly observed Layer-7 hostname identity are different facts.
+
+Do not claim that a connection used a hostname merely because its destination IP appeared in a DNS resolution set.
+
+When Layer-7 hostname information is later supported, preserve the source of that knowledge, such as TLS SNI, HTTP Host, DNS correlation, or `not_observed`.
 
 ### FW storage direction
 
@@ -205,7 +252,7 @@ Long-term HDD/RAID history belongs to Net-Hunter rather than the live firewall.
 
 ### Net-Hunter independence
 
-Net-Hunter unavailability must not stop Stronghold FW capture, routing, or firewall enforcement while local FW resources remain capable of operating.
+Net-Hunter unavailability must not stop Stronghold FW capture, bridging, routing, or firewall enforcement while local FW resources remain capable of operating.
 
 A Net-Hunter outage creates explicit transfer backlog/degraded state.
 
@@ -346,6 +393,9 @@ catalog unavailable
 record/index lag
 jail unavailable
 ZFS storage degradation
+bridge failure
+route application failure
+firewall policy application failure
 ```
 
 A failed verification is still a factual verification result.
@@ -408,6 +458,8 @@ Before proposing a change as complete:
 - verify raw PCAP authority remains intact;
 - verify packet-loss and degraded states remain truthful;
 - verify records do not silently substitute inference for observation;
+- verify physical observation remains distinguishable from bridge/route/firewall/NAT disposition;
+- verify VLAN and interface identities are preserved explicitly;
 - verify durability and transfer behavior remain explicit;
 - verify Net-Hunter is not accidentally introduced into the live FW dependency path;
 - verify External UI authoritative-data access remains read-only;
@@ -421,7 +473,7 @@ Before proposing a change as complete:
 
 More specific directories may contain their own `AGENTS.md`.
 
-A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, Net-Hunter isolation, UI read-only, configuration-backup, or repository-operation requirements.
+A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, networking identity, Net-Hunter isolation, UI read-only, configuration-backup, or repository-operation requirements.
 
 Current nested engineering standard:
 
