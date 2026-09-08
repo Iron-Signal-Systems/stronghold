@@ -53,6 +53,16 @@ A WAN, route, interface, or alternate path is not eligible merely because Strong
 
 Administrative actions, system/health state, traffic decisions, trust/identity changes, clock state, and Net-Hunter processing activity belong to separate append-oriented journal domains. Corrections and superseding state create new entries rather than silently rewriting prior history.
 
+### Retention is controlled destruction
+
+> **Expiration eligibility is not permission to delete.**
+
+Stronghold applies retention independently to authoritative PCAP and each journal domain. Holds override ordinary expiration. Destruction is an explicit lifecycle transition that remains attributable in journal history.
+
+> **A full disk is a failure condition, not permission to rewrite history.**
+
+Storage pressure may change work priority and may advance already-authorized retention actions, but it must not silently invent emergency deletion rules or hide capture/history loss.
+
 ## Capture Invariant #1 — Wireshark-Class Interface Visibility
 
 Stronghold's first capture requirement is:
@@ -717,6 +727,7 @@ objects
 management settings
 Hunter settings
 identity/trust settings where applicable
+retention/hold settings where applicable
 ```
 
 Runtime decision records reference the applicable configuration generation.
@@ -832,11 +843,16 @@ history.view
 history.export
 journal.audit_view
 system.admin
+retention.admin
+hold.admin
+history.destroy
 ```
 
 Viewing an investigation is not equivalent to being allowed to export raw or derived packet history.
 
 Candidate-edit and commit authority are separate permissions so later separation-of-duties or two-person workflows do not require an authorization redesign.
+
+Destructive history authority is separate from ordinary hunt/query and ordinary system administration.
 
 ### FW and Hunter administration remain separate
 
@@ -1135,6 +1151,7 @@ software update
 reboot/shutdown
 break-glass use
 PCAP/report export
+hold creation/change/release
 retention/destructive administration
 ```
 
@@ -1157,6 +1174,7 @@ WAN path degradation/restoration
 authentication-backend availability
 service/jail state
 ZFS/storage degradation
+retention pressure/capacity warnings
 ```
 
 A later recovery does not erase the earlier failure.
@@ -1245,7 +1263,8 @@ commit
 indexing
 correlation/reprocessing
 export creation
-retention action
+retention eligibility/action
+archive transition
 processing failure/retry
 ```
 
@@ -1296,7 +1315,104 @@ Parser/correlation improvements create new/superseding derived interpretation wh
 
 The UI may present the newest valid interpretation by default without pretending earlier processing never happened.
 
-## Local FW Storage Tiers
+## Retention, Holds, Archive, and Controlled Destruction
+
+### Independent retention domains
+
+Authoritative PCAP and each journal domain have independent retention policy.
+
+A customer may retain packet content for a shorter period while retaining Traffic Decision, Administrative, Trust/Identity, or other journal history much longer. Expiration of PCAP must not silently imply expiration of the journals that explain the historical decision/state.
+
+Retention values are deployment/configuration policy rather than hard-coded architecture defaults.
+
+### Retention classes and scope
+
+Stronghold may support explicit retention classes associated with configured scope such as:
+
+```text
+appliance
+site
+VLAN
+zone
+other approved administrative object/context
+```
+
+The design should allow policies such as STANDARD, EXTENDED, or CRITICAL without embedding specific time periods into the architecture.
+
+Destructive retention must not depend on speculative deep-packet classification where parser correctness could cause unintended deletion. More complex content-derived retention requires an explicit later contract.
+
+### Lifecycle
+
+The conceptual lifecycle is:
+
+```text
+CREATE
+  ↓
+ACTIVE
+  ↓
+RETAINED
+  ↓
+ELIGIBLE_FOR_EXPIRATION
+  ↓
+AUTHORIZED_DESTRUCTION
+  ↓
+DESTROYED
+  ↓
+DESTRUCTION JOURNALED
+```
+
+Reaching the configured age makes history eligible for expiration; it does not independently authorize deletion when another control such as a hold applies.
+
+### Holds
+
+Legal, investigative, and administrative holds override ordinary expiration.
+
+A hold may scope applicable PCAP and/or journal history. Initial design should favor exact, reproducible scope such as appliance, time range, VLAN/zone, host/IP, MAC, capture segment, or explicit journal range rather than ambiguous semantic queries whose meaning may change when parsers improve.
+
+Creating, modifying, or releasing a hold is an Administrative Journal event and must preserve the responsible identity/authority and applicable scope.
+
+### Destruction authority
+
+Normal retention-driven destruction and manual administrative destruction are distinct actions.
+
+Manual destruction requires explicit privileged authority and a reason. The authorization model leaves room for reauthentication/MFA and dual authorization for sensitive deployments without requiring every environment to use dual approval initially.
+
+Ordinary Hunter, export, or general system roles do not automatically receive destruction authority.
+
+### Destruction journal
+
+Destruction must not erase the fact that the history existed.
+
+The surviving journal record should retain, where applicable and safe:
+
+```text
+object/segment/journal identity
+original source Appliance ID
+original capture/time range
+original integrity identity/hash
+retention policy or manual authority
+hold evaluation where relevant
+destruction reason
+destruction time/order
+responsible user/process
+result
+```
+
+If a destructive action fails or is partially completed, that failure is also journaled rather than rewritten away by a later retry.
+
+### Archive is not destruction
+
+A future archive/offline-storage capability is a separate lifecycle transition.
+
+```text
+ACTIVE_HUNTER
+    ↓
+ARCHIVED
+```
+
+Archive movement must preserve object identity, integrity, lineage, and retrieval status. Moving an object to archive does not permit Stronghold to describe it as destroyed.
+
+## Local FW Storage Tiers and Pressure
 
 Stronghold FW storage is intentionally short-path and capture-focused:
 
@@ -1313,6 +1429,54 @@ Net-Hunter dedicated history network
 Long-term HDD/RAID history storage belongs to Net-Hunter, not the firewall appliance.
 
 The operating-system filesystem and PCAP filesystem must remain separate so capture-storage exhaustion cannot silently exhaust the root filesystem.
+
+### FW pressure states
+
+Stronghold FW should expose explicit storage-pressure states such as:
+
+```text
+NORMAL
+HIGH
+URGENT
+CRITICAL
+```
+
+Threshold values and exact actions remain implementation/configuration details, but state transitions must be observable in the System/Health Journal.
+
+Pressure may:
+
+```text
+throttle/pause nonessential processing
+accelerate transfer of finalized history
+prioritize safe HOT→WARM movement
+advance only already-authorized expiration of safe history
+increase operator alerts/status urgency
+```
+
+Pressure does not silently create new destructive authority.
+
+### Acknowledged versus unacknowledged history
+
+History that Net-Hunter has independently verified, durably committed, and acknowledged is safer to expire from FW local tiers than history that has not completed that handoff.
+
+By default, unacknowledged authoritative FW history must not be automatically deleted merely to hide storage pressure.
+
+If an operator later chooses to allow destructive emergency behavior for unacknowledged history, that must be an explicit separately governed policy with truthful loss/destruction journaling; it is not an implicit Stronghold default.
+
+### FW exhaustion behavior
+
+If local FW storage becomes unable to durably preserve newly observed packets, Stronghold must report that capture continuity has failed.
+
+Conceptually:
+
+```text
+Capture visibility: packets still presented
+Durable capture:    FAILED / DEGRADED
+Reason:             STORAGE_EXHAUSTED
+History gap:         PRESENT
+```
+
+Routing, NAT, and firewall enforcement may continue where the dataplane remains healthy, but Stronghold must not claim complete packet history across the gap.
 
 ## Net-Hunter Outage Behavior
 
@@ -1335,7 +1499,7 @@ WARM storage:        known utilization
 
 Journal and configuration-history backlog must also remain observable where applicable.
 
-Storage exhaustion and retention behavior require an explicit later contract. Stronghold must not silently discard history or claim continuity that did not occur.
+If local backlog capacity is ultimately exhausted, Stronghold follows the explicit FW exhaustion behavior above rather than silently discarding history or claiming continuity that did not occur.
 
 ## Capture Segment Lifecycle
 
@@ -1392,7 +1556,7 @@ Net-Hunter finalizes destination
        ↓
 Net-Hunter independently verifies integrity
        ↓
-Net-Hunter commits packet/history state
+Net-Hunter durably commits packet/history state
        ↓
 Net-Hunter appends Hunter processing journal state
        ↓
@@ -1401,7 +1565,9 @@ Net-Hunter acknowledges verified receipt
 FW records acknowledgement
 ```
 
-Source-retention decisions may consider the acknowledged Net-Hunter copy only after applicable verification and commit requirements have completed.
+Source-retention decisions may consider the acknowledged Net-Hunter copy only after applicable verification and durable commit requirements have completed.
+
+Storage pressure must never cause Net-Hunter to ACK an object that has not actually completed the required verification/commit boundary.
 
 History must retain source lineage, including the originating Stronghold FW Appliance ID, capture-segment identity, and source journal identity/ordering where applicable.
 
@@ -1532,7 +1698,7 @@ Configuration history should be versioned/append-oriented rather than represente
 
 The exact backup/restore trust, secret-handling, and authorization contract remains to be designed.
 
-## Net-Hunter Storage Direction
+## Net-Hunter Storage Direction and Pressure
 
 Net-Hunter storage should separate high-IOPS processing/query workloads from large sequential historical-PCAP workloads where practical.
 
@@ -1560,6 +1726,23 @@ RAIDZ2 is a current candidate for bulk history storage, but exact vdev width/top
 
 Hardware RAID must not hide bulk history disks from ZFS in the intended architecture.
 
+Net-Hunter should expose, where measurable:
+
+```text
+FAST/WARM/HISTORY utilization
+ingest rate
+retention expiration rate
+net storage growth
+pending/backlogged work
+projected remaining capacity
+```
+
+Capacity projections are operational estimates and must expose when insufficient history/data makes them unreliable.
+
+As Hunter storage pressure rises, Stronghold should first preserve verified ingest/commit and reduce nonessential processing while advancing only retention actions already authorized by policy and not blocked by holds.
+
+If Hunter cannot durably commit new history, it must fail the commit/ACK path. The source FW then retains backlog locally according to the transfer contract rather than being told that uncommitted history is safe to remove.
+
 ## Net-Hunter Read/Write Boundaries
 
 | Resource | PCAP Ingest | Record Processing | External UI | FW Config Backup |
@@ -1572,6 +1755,7 @@ Hardware RAID must not hide bulk history disks from ZFS in the intended architec
 | Hunter Processing Journal | append as applicable | append as applicable | read-only | no |
 | Hunt/query history | no | produces | read-only | no |
 | Derived export workspace | no | as required | writable non-authoritative | no |
+| Retention/hold/destruction control | no | no | no ordinary access | no |
 | FW configuration backups | no | no | no access | controlled read/write |
 | External user access | no | no | yes | no |
 
@@ -1619,6 +1803,7 @@ Hunter processing journals
 derived analytical records/indexes
 runtime policy/routing/NAT/WAN decisions
 configuration generations
+retention/hold/destruction state
 user-generated notes/views/exports
 ```
 
