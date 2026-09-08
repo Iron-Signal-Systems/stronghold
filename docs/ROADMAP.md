@@ -2,7 +2,7 @@
 
 ## Phase 0 — Traffic Observation Foundation
 
-Phase 0 exists to prove that Stronghold can continuously capture configured interfaces, durably preserve the traffic, truthfully report loss and degradation, catalog what was observed, and manage capture storage without allowing secondary work to compromise live capture.
+Phase 0 exists to prove that Stronghold can continuously capture configured interfaces, durably preserve traffic, truthfully report loss and degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
 Routing and firewall enforcement are not part of Phase 0.
 
@@ -10,7 +10,7 @@ Routing and firewall enforcement are not part of Phase 0.
 
 Phase 0 is governed by the following capture requirement:
 
-> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, routes, or firewall-processes it.**
+> **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
 
 Wireshark/dumpcap on the same supported physical interface under the same conditions is the Phase 0 reference visibility baseline.
 
@@ -53,21 +53,26 @@ A capture copied away from the appliance should retain useful provenance such as
 
 Define how NIC/driver metadata such as VLAN information is preserved when hardware offload changes the userspace byte representation of a frame.
 
-### 0.4 Storage tier contract
+### 0.4 FW local storage contract
 
-Freeze the downward storage model:
+Freeze the Stronghold FW local storage model:
 
 ```text
 RAM buffer
-    -> NVMe HOT
-    -> SSD WARM
-    -> HDD/RAID COLD
-    -> optional ARCHIVE/OFFLOAD
+    -> NVMe / XFS HOT
+    -> local SSD / XFS WARM/BACKLOG
+    -> verified transfer to Stronghold Net-Hunter
 ```
 
-Define high-water, urgent, and critical storage-pressure behavior.
+Long-term HDD/RAID history storage belongs to Net-Hunter rather than the live firewall appliance.
+
+Define high-water, urgent, and critical storage-pressure behavior for the FW HOT/WARM tiers.
+
+Define what happens while Net-Hunter is unavailable, including backlog accounting, oldest-pending history, and explicit degraded-state reporting.
 
 RAM is never classified as durable capture storage.
+
+The operating-system filesystem and PCAP filesystems must remain separated so capture-storage exhaustion cannot silently exhaust the root filesystem.
 
 ### 0.5 Capture resource-protection contract
 
@@ -77,14 +82,14 @@ Freeze the workload priority:
 1. packet receive
 2. active PCAP writes
 3. segment finalization / essential integrity work
-4. essential catalog state
-5. tier migration
-6. compression
-7. remote offload
-8. deep indexing / analytics
+4. essential observation/catalog state
+5. local tier movement / backlog handling
+6. transfer to Net-Hunter
+7. compression where approved
+8. deep indexing / analytics outside the FW live path
 ```
 
-Define the measurements that throttle or pause secondary work, including capture-ring occupancy, packet drops, CPU load, memory pressure, NVMe write latency/queue pressure, storage pressure, and backlog.
+Define the measurements that throttle or pause secondary work, including capture-ring occupancy, packet drops, CPU load, memory pressure, NVMe write latency/queue pressure, storage pressure, and transfer backlog.
 
 ### 0.6 Single-interface capture prototype
 
@@ -96,7 +101,7 @@ Arch Linux x86_64
     -> AF_PACKET / TPACKET_V3
     -> RAM ring
     -> PCAPNG writer
-    -> NVMe hot storage
+    -> NVMe / XFS HOT storage
     -> rotation
     -> close / durability boundary
     -> hash
@@ -105,13 +110,15 @@ Arch Linux x86_64
 
 The prototype must capture observable traffic without protocol allowlisting.
 
-No compression, tiering, offload, routing, or firewall code is required for this slice.
+No compression, local tier movement, Net-Hunter transfer, routing, or firewall code is required for this slice.
 
 ### 0.7 Multi-interface capture
 
-Extend capture to the initial target of 2–4 physical interfaces.
+Extend capture to multiple qualified physical interfaces.
 
 Begin with one capture worker/ring per physical interface unless profiling establishes a need for a different arrangement.
+
+Do not freeze the supported interface count as a product claim until representative hardware sizing and performance qualification establish it.
 
 ### 0.8 Performance, loss, and visibility profiling
 
@@ -161,39 +168,53 @@ Compare applicable frame counts, captured lengths, EtherTypes, MAC addressing, p
 
 A protocol parser is not required for this gate. The packet/frame must first be present in the authoritative capture.
 
-### 0.9 Compression and downward tiering
+### 0.9 Local tier movement and compression
 
-Add background downward tiering of finalized segments.
+Add background movement of finalized segments from NVMe HOT storage to local SSD WARM/BACKLOG storage as required by the local retention/backlog contract.
 
-Evaluate Zstandard as the initial compression method.
+Evaluate Zstandard as the initial compression method where compression is justified.
 
 Compression must occur only on finalized segments and must automatically throttle/pause when capture resources require priority.
 
-Verify the lower-tier copy before removing the higher-tier source.
+Verify a lower-tier copy before removing the higher-tier source.
 
-### 0.10 Selective VLAN offload
+Compression is subordinate to live capture and must not become a prerequisite for a segment to remain safely queued for Net-Hunter transfer.
 
-Add downstream selection/offload of configured VLAN traffic from authoritative local capture.
+### 0.10 Verified Net-Hunter history transfer
 
-Initial destination classes to design/test:
+Add the initial Stronghold FW -> Net-Hunter transfer path for finalized authoritative history.
 
-- SMB / UNC-backed storage;
-- SFTP;
-- SSH-based transfer; and
-- iSCSI-backed mounted storage.
+Phase 0 transfer behavior must follow the high-level architecture:
 
-Offload destination failure must create an observable backlog/degraded condition without stopping local capture.
+```text
+FW finalized segment
+    -> establish required integrity metadata
+    -> transfer over dedicated Stronghold history path
+    -> Net-Hunter receive/finalize
+    -> Net-Hunter independently verify
+    -> Net-Hunter commit
+    -> Net-Hunter acknowledge verified receipt
+    -> FW record acknowledgement
+```
+
+Net-Hunter unavailability must create an observable backlog/degraded condition without stopping local capture while local capacity remains available.
+
+A source segment must not be deleted merely because a network copy call returned successfully.
+
+The exact transfer protocol, trust/certificate model, and retry/backoff contract remain to be frozen before this engineering slice is implemented.
 
 ## Phase 0 Exit Gate
 
 Phase 0 is not complete until Stronghold can demonstrate, on representative supported hardware, that it can continuously capture configured interfaces for an extended period and truthfully answer:
 
-> **What did the hardware present to Stronghold, what did Stronghold durably capture, what—if anything—was dropped, where are the packets now, and can the relevant traffic be found and exported without compromising ongoing capture?**
+> **What did the hardware present to Stronghold, what did Stronghold durably capture, what—if anything—was dropped, where are the packets now, what history is pending transfer, what has Net-Hunter independently verified, and can the relevant traffic be found/exported without compromising ongoing capture?**
 
-The exit gate must include documented Wireshark/dumpcap reference visibility, Layer-2/control-plane capture behavior, resource/load behavior, loss accounting, interrupted-operation recovery, storage-pressure behavior, migration verification, and offload-degradation behavior.
+The exit gate must include documented Wireshark/dumpcap reference visibility, Layer-2/control-plane capture behavior, resource/load behavior, loss accounting, interrupted-operation recovery, storage-pressure behavior, local tier-movement verification, Net-Hunter outage/backlog behavior, and verified history-handoff behavior.
 
 ## Later Phases
 
-Later roadmap phases will cover networking and enforcement, including static routing, VLAN/subinterface configuration, nftables stateful policy, policy objects, and FQDN-resolved policy objects.
+Stronghold's broader architecture already anticipates Layer-2 bridging, Layer-3 routing, router-on-a-stick operation, default-deny security policy, early authorization, NAT, VLAN/zone/interface objects, FQDN policy, multi-WAN preference, transactional configuration generations, and the complete Net-Hunter processing/hunt system.
 
-Those phases must not be pulled into Phase 0 without explicit approval.
+The exact implementation phase sequence for those later capabilities is intentionally **not frozen yet**. The complete product architecture is still being defined before the later roadmap is decomposed into implementation gates.
+
+Those capabilities must not be pulled into Phase 0 without explicit approval.
