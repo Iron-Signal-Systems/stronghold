@@ -16,7 +16,11 @@ Stronghold is built around these governing principles:
 
 > **Stronghold operational history is journaled, not treated as an overwriteable catch-all log.**
 
-Stronghold engineering must preserve truthful packet observation, explicit packet-loss accounting, durable capture semantics, authorization-first forwarding behavior, clear failure behavior, operational simplicity, identity/trust boundaries, timestamp truthfulness, journal lineage, and the separation between Stronghold FW and Stronghold Net-Hunter.
+> **Expiration eligibility is not permission to delete.**
+
+> **A full disk is a failure condition, not permission to rewrite history.**
+
+Stronghold engineering must preserve truthful packet observation, explicit packet-loss accounting, durable capture semantics, authorization-first forwarding behavior, clear failure behavior, operational simplicity, identity/trust boundaries, timestamp truthfulness, journal lineage, retention/hold/destruction authority, and the separation between Stronghold FW and Stronghold Net-Hunter.
 
 ## Product Model
 
@@ -52,6 +56,7 @@ hunt
 query
 export
 preserve FW configuration backups
+manage authorized retention/hold lifecycle
 ```
 
 Net-Hunter must never become a runtime dependency for Stronghold FW capture, bridging, routing, NAT, or firewall enforcement.
@@ -90,7 +95,7 @@ Secondary work may throttle, pause, or fall behind. Stronghold must not delibera
 
 Raw PCAPNG is authoritative for what network traffic Stronghold observed.
 
-Structured observation, authorization, flow, protocol, bridge, firewall, routing, NAT, WAN-selection, system, configuration, trust, time, and Hunter-processing history exists to explain, correlate, locate, and make the authoritative packet history usable.
+Structured observation, authorization, flow, protocol, bridge, firewall, routing, NAT, WAN-selection, system, configuration, trust, time, retention, and Hunter-processing history exists to explain, correlate, locate, and make the authoritative packet history usable.
 
 Failure to recognize, decode, enrich, index, or correlate traffic must not cause the underlying packet to be discarded.
 
@@ -157,7 +162,7 @@ Do not infer a positive state from the absence of an error.
 
 Do not report a packet as durably captured merely because it reached RAM or because a write call returned successfully.
 
-Packet drops, capture gaps, journal/index lag, Net-Hunter transfer backlog, storage pressure, route failures, WAN degradation, clock uncertainty, authentication-service failures, configuration failures, and verification failures must remain observable.
+Packet drops, capture gaps, journal/index lag, Net-Hunter transfer backlog, storage pressure, route failures, WAN degradation, clock uncertainty, authentication-service failures, configuration failures, retention/destruction failures, and verification failures must remain observable.
 
 ### Journal, do not casually log
 
@@ -184,11 +189,23 @@ Critical journal integrity/tamper detection should remain possible. Do not choos
 
 PCAP integrity remains segment-oriented; do not introduce per-packet cryptographic chaining merely because journals are append-oriented.
 
+### Retention is explicit policy
+
+Retention applies independently to authoritative PCAP and each journal domain.
+
+Do not implement one global retention age that silently erases packet content and every journal at the same time unless an explicit approved policy intentionally does so.
+
+Reaching an age/threshold only establishes expiration eligibility. Holds, authorization, integrity state, transfer state, and other required controls must still be evaluated before destruction.
+
+A legal/investigative/administrative hold overrides ordinary expiration within its approved scope.
+
+Do not make destructive retention depend on speculative deep-packet or parser-derived classification without an explicit approved contract.
+
 ### Simple does not mean vague
 
 Stronghold should remain operationally simple while retaining authoritative technical detail.
 
-Do not hide Linux, FreeBSD, NIC, packet-capture, bridge, routing, firewall, nftables/netfilter, filesystem, ZFS, jail, identity, PKI, clock, journal, storage, or failure behavior behind vague abstractions.
+Do not hide Linux, FreeBSD, NIC, packet-capture, bridge, routing, firewall, nftables/netfilter, filesystem, ZFS, jail, identity, PKI, clock, journal, retention, storage, or failure behavior behind vague abstractions.
 
 ### Prefer explicit engineering
 
@@ -208,7 +225,7 @@ The broader architecture may be documented before its implementation phase begin
 
 ### Architecture invariants
 
-`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, networking, policy, routing, storage, history-transfer, identity, trust, authentication, time, journal, jail, configuration, and read/write-boundary architecture.
+`docs/ARCHITECTURE.md` defines the current Stronghold FW, Net-Hunter, capture, networking, policy, routing, storage, history-transfer, identity, trust, authentication, time, journal, retention, jail, configuration, and read/write-boundary architecture.
 
 Future dedicated contracts may refine implementation details without silently weakening these invariants.
 
@@ -216,7 +233,7 @@ Future dedicated contracts may refine implementation details without silently we
 
 Work only within the current roadmap phase and current engineering slice unless explicitly directed otherwise.
 
-Stronghold begins implementation with the FW capture foundation. Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, NAT, adaptive WAN selection, remote authentication, PKI enrollment, journal implementation, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, VRF, or other future systems into the current phase unless explicitly approved.
+Stronghold begins implementation with the FW capture foundation. Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, NAT, adaptive WAN selection, remote authentication, PKI enrollment, journal implementation, full retention/hold administration, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, HA, dynamic routing, VRF, or other future systems into the current phase unless explicitly approved.
 
 Future compatibility may be preserved where useful, but future features should not be implemented early without a concrete current requirement.
 
@@ -234,7 +251,7 @@ When implementation conflicts with an existing contract:
 4. surface the issue explicitly; and
 5. resolve the discrepancy intentionally before continuing through that boundary.
 
-Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, journal separation/ordering, authorization-before-routing behavior, policy ordering, default-deny behavior, interface/VLAN identity, forwarding-disposition traceability, route-selection rules, WAN eligibility, identity/trust separation, LDAPS-only AD behavior, timestamp truthfulness, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, retention behavior, or lineage/provenance.
+Do not silently weaken capture completeness claims, packet-loss accounting, durability requirements, journal separation/ordering, authorization-before-routing behavior, policy ordering, default-deny behavior, interface/VLAN identity, forwarding-disposition traceability, route-selection rules, WAN eligibility, identity/trust separation, LDAPS-only AD behavior, timestamp truthfulness, retention/hold/destruction controls, integrity verification, storage migration safety, Net-Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, or lineage/provenance.
 
 ## Stronghold FW Rules
 
@@ -390,11 +407,13 @@ External authentication failure must not affect the dataplane.
 
 Authentication is not authorization.
 
-Keep important privileges separable, including viewing config, editing candidate config, validating, committing, rollback, system administration, hunting, and PCAP export.
+Keep important privileges separable, including viewing config, editing candidate config, validating, committing, rollback, system administration, hunting, PCAP export, hold administration, retention administration, and manual destruction.
 
 Viewing Hunter history is not equivalent to permission to export packet data.
 
 Net-Hunter access is not FW administration authority.
+
+Ordinary hunt/export/system roles must not silently gain destructive history authority.
 
 ### Management ingress
 
@@ -404,7 +423,7 @@ The `HISTORY` interface is not a normal interactive administration path.
 
 ### Administrative journal
 
-Authentication attempts, MFA state where known, session lifecycle, role use/change, candidate/config actions, commits, rollbacks, exports, break-glass use, update/reboot/shutdown, and other privileged activity belong in the Administrative Journal.
+Authentication attempts, MFA state where known, session lifecycle, role use/change, candidate/config actions, commits, rollbacks, exports, hold changes, retention/destruction actions, break-glass use, update/reboot/shutdown, and other privileged activity belong in the Administrative Journal.
 
 Never log passwords, TOTP secrets/codes, private keys, or other plaintext credentials.
 
@@ -515,11 +534,51 @@ Do not infer later pipeline work when it did not occur.
 
 ### Hunter processing
 
-Net-Hunter preserves source FW journals and appends its own receive/verify/commit/process/reprocess/export/retention events.
+Net-Hunter preserves source FW journals and appends its own receive/verify/commit/process/reprocess/export/retention/archive events.
 
 Hunter does not rewrite the originating FW journal entry.
 
 Derived analytical records may be superseded by new derived interpretation but must retain lineage to source PCAP/journal facts.
+
+## Retention, Hold, and Destruction Rules
+
+### Independent policy domains
+
+PCAP and each journal domain have independent retention policy.
+
+Do not assume that packet content and Administrative/Trust/Traffic/System/Time/Hunter journals expire together.
+
+Retention periods/classes are deployment policy. Do not hard-code example durations from architecture discussions into product behavior without an explicit requirement.
+
+### Eligibility is not authority
+
+Age or storage threshold may make an object eligible for expiration, but eligibility alone does not authorize destruction.
+
+Before destruction, evaluate applicable policy, hold state, object/transfer state, authorization, and required integrity/lineage conditions.
+
+### Holds
+
+Legal, investigative, and administrative holds override normal retention within their scope.
+
+Hold creation, modification, and release are privileged Administrative Journal events.
+
+Prefer exact/reproducible scope over ambiguous parser-dependent query scope when designing destructive hold behavior.
+
+### Destruction
+
+Retention-driven destruction and manual administrative destruction are separate actions.
+
+Manual destruction requires explicit privileged authorization and a reason. Preserve room for reauthentication/MFA or dual authorization in higher-assurance deployments.
+
+Destruction never silently removes the historical fact that the object existed. Journal the applicable object identity, source, original time/capture range, integrity identity where required/safe, policy/reason, responsible identity/process, time/order, and result.
+
+Failed/partial destruction is still factual history and must be journaled.
+
+### Archive
+
+Archive movement is not destruction.
+
+Preserve identity, integrity, lineage, and retrieval state across a future archive transition.
 
 ## Dedicated History Network Rules
 
@@ -532,6 +591,8 @@ History-link speed is independent of the validated Stronghold FW dataplane ratin
 History transfer is a verified mTLS-authenticated handoff, not a blind copy/delete operation.
 
 A source segment/journal batch must remain distinguishable from destination receipt, finalization, verification, commit, and acknowledgement.
+
+Net-Hunter MUST NOT acknowledge history merely because it received bytes. The required destination durability/verification/commit boundary must complete first, even under storage pressure.
 
 ## Net-Hunter Host Rules
 
@@ -600,7 +661,7 @@ modify observation records
 silently rewrite processed records/indexes
 delete historical data outside an explicitly authorized retention/destructive workflow
 change ingest state
-change retention policy without separate authorization
+change retention/hold policy without separate authorization
 modify FW configuration backups
 modify Stronghold FW policy/configuration through the hunt interface
 ```
@@ -661,12 +722,15 @@ catalog/journal unavailable
 record/index lag
 jail unavailable
 ZFS storage degradation
+retention blocked by hold
+destruction authorization failure
+partial destruction
 bridge failure
 route application failure
 firewall policy application failure
 ```
 
-A failed verification/authentication/commit is still a factual result.
+A failed verification/authentication/commit/destruction is still a factual result.
 
 A partially completed operation must preserve what actually occurred.
 
@@ -684,7 +748,7 @@ Interrupted artifacts should be preserved when required for truthful reconciliat
 
 Cleanup must not destroy information required to determine what actually occurred.
 
-## Storage and Migration Rules
+## Storage, Pressure, and Migration Rules
 
 On Stronghold FW, capture data begins on the fastest configured durable PCAP tier and may move to local backlog storage before transfer to Net-Hunter.
 
@@ -692,9 +756,31 @@ Only finalized closed segments may be migrated or transferred.
 
 A source capture must not be deleted merely because a destination write or transfer completed. Destination finalization, integrity verification, history commit, and acknowledgement requirements must complete according to the applicable contract before source-retention state advances.
 
+### FW pressure behavior
+
+FW storage pressure should expose explicit states such as NORMAL, HIGH, URGENT, and CRITICAL.
+
+Pressure may throttle/pause secondary work, accelerate safe transfer/tiering, or advance retention actions that were already authorized and are not blocked by holds.
+
+Pressure must not silently create a new emergency deletion policy.
+
+Acknowledged history that Net-Hunter has independently verified and committed is safer to expire locally than unacknowledged history.
+
+By default, do not automatically delete unacknowledged authoritative FW history merely to hide a full/near-full disk.
+
+If storage exhaustion prevents durable capture, report the real capture/history gap. Continue forwarding/enforcement where possible, but do not claim packet-history continuity.
+
+### Hunter pressure behavior
+
+Net-Hunter should expose utilization, ingest/expiration rates, net growth, backlog, and projected remaining capacity where those values can be established.
+
+As pressure rises, preserve ingest/verification/commit first, reduce nonessential processing, and execute only already-authorized retention work not blocked by holds.
+
+If Hunter cannot durably commit new history, fail the commit/ACK path so the FW retains backlog locally.
+
 Compression, transfer, journal consolidation/transport, and other background work must throttle or pause when capture CPU, RAM-ring occupancy, packet-loss state, or storage I/O pressure indicates that capture needs the resources.
 
-On Net-Hunter, ZFS protects storage, but ZFS state is not a replacement for Stronghold segment identities, hashes, source-journal identity/sequence, lineage, verification records, or transfer history.
+On Net-Hunter, ZFS protects storage, but ZFS state is not a replacement for Stronghold segment identities, hashes, source-journal identity/sequence, lineage, verification records, transfer history, or destruction history.
 
 ## Secrets and Sensitive Material
 
@@ -738,6 +824,10 @@ Before proposing a change as complete:
 - verify certificate validity does not silently grant peer authorization;
 - verify timestamp resolution is not presented as accuracy;
 - verify wall-clock correction cannot erase journal/event ordering;
+- verify retention eligibility has not been equated with destruction authority;
+- verify holds override normal expiration within their scope;
+- verify storage pressure cannot silently delete unacknowledged history;
+- verify Hunter cannot ACK uncommitted/unverified history;
 - verify durability and transfer behavior remain explicit;
 - verify Net-Hunter is not accidentally introduced into the live FW dependency path;
 - verify External UI authoritative-data access remains read-only;
@@ -751,4 +841,4 @@ Before proposing a change as complete:
 
 More specific directories may contain their own `AGENTS.md`.
 
-A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, authorization, identity/trust, time, journal, Net-Hunter isolation, UI read-only, configuration-backup, or repository-write requirements.
+A nested file may add or refine requirements for that portion of the tree but must not silently weaken repository-wide capture, durability, integrity, security, truthfulness, authorization, identity/trust, time, journal, retention, Net-Hunter isolation, UI read-only, configuration-backup, or repository-write requirements.
