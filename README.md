@@ -2,15 +2,31 @@
 
 **Stronghold by Iron Signal Systems**
 
-Stronghold is a capture-first network security appliance project. The initial platform is a stripped-down Arch Linux x86_64 system with a simple CLI-focused operating model.
+Stronghold is a two-appliance network security system built around complete network observation, comprehensive records, policy enforcement, and retained packet history.
 
-Stronghold begins with observation before enforcement: continuously capture traffic, catalog what was observed, preserve packet-level truth, tier completed captures to appropriate storage, and make those captures queryable and exportable. Routing, VLAN/subinterface configuration, and firewall policy enforcement are later layers built on top of that observation foundation.
+**Stronghold FW** runs on Arch Linux and observes, records, routes, and enforces live traffic.
+
+**Stronghold Net-Hunter** runs on FreeBSD with ZFS and jails and receives verified packet history, processes network records, preserves historical PCAP, and provides a read-only hunt/query interface.
+
+The system is built around five responsibilities:
+
+```text
+OBSERVE
+   ↓
+RECORD
+   ↓
+ENFORCE
+   ↓
+REMEMBER
+   ↓
+HUNT
+```
 
 ## Governing Principle
 
 > **Capture first. Never sacrifice observation for secondary work.**
 
-Live packet capture and durable local writes take priority over compression, tier migration, remote offload, indexing, analytics, and other background work.
+Live packet capture and durable local writes take priority over compression, transfer, indexing, analytics, and other background work.
 
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
 
@@ -24,66 +40,103 @@ Protocol recognition is not required before capture. When presented to the inter
 
 Stronghold does not claim visibility into traffic that the network topology, NIC hardware, hardware filtering/offload behavior, or driver never presents to the supported capture path.
 
-## Initial Platform
+## Stronghold FW
 
-- Arch Linux, minimal CLI installation
-- x86_64
-- physical PCIe Ethernet interfaces with strong Linux driver support
-- Linux-native packet capture
-- AF_PACKET / TPACKET_V3 as the initial capture direction
-- continuous full-packet PCAPNG capture
-- local-first durable storage
-- CLI administration
+Stronghold FW is the live network appliance.
 
-## Capture Storage Model
+Current direction:
 
-Stronghold uses downward storage tiering:
+- Arch Linux, minimal CLI-focused appliance installation;
+- x86_64;
+- physical PCIe Ethernet interfaces with strong Linux driver support;
+- 1 GbE and 10 GbE as current dataplane targets;
+- 40 GbE preserved as a future dataplane hardware target only and not currently claimed as tested or supported;
+- Linux-native packet capture;
+- AF_PACKET / TPACKET_V3 as the initial capture direction;
+- continuous full-packet PCAPNG capture;
+- local-first durable packet storage;
+- routing, VLANs, nftables stateful firewalling, NAT, and policy enforcement as later layers built on the capture foundation.
+
+### FW storage direction
 
 ```text
-NIC
- ↓
 RAM buffer / capture ring
- ↓
-NVMe — hot ingest tier
- ↓
-SSD — warm tier
- ↓
-HDD / RAID — cold tier
- ↓
-optional selected offload/archive
+    ↓
+NVMe — HOT PCAP tier — XFS
+    ↓
+local SSD — WARM / backlog tier — XFS
+    ↓
+dedicated Stronghold history network
+    ↓
+Stronghold Net-Hunter
 ```
 
-RAM is buffering only and is not considered durable capture storage.
+The Arch Linux operating system is expected to live on separate local SSD storage, with Btrfs as the current preferred OS-filesystem direction.
 
-Completed segments may be compressed while tiering downward when CPU and I/O resources allow. Compression must automatically throttle or pause when capture resources are under pressure.
+PCAP storage must remain separate from the operating-system filesystem so capture-storage exhaustion does not silently become root-filesystem exhaustion.
 
-## Offload Model
+Net-Hunter availability must not determine whether live FW capture continues. A Hunter outage creates local backlog and an explicit degraded state while local capacity remains available.
 
-Stronghold captures the configured interfaces locally first. Offload policy is separate from capture policy.
+## Dedicated History Network
 
-For example, a system may capture all traffic observed on `eth0` and `eth1` while retaining or offloading selected VLANs such as VLAN 1, VLAN 2, and VLAN 201 to approved destinations.
+Stronghold FW and Stronghold Net-Hunter communicate over a dedicated history-transfer interface or network.
 
-Planned destination classes include SMB/UNC-backed storage, SFTP/SSH-based transfer, and iSCSI-backed mounted storage.
+Current physical link direction:
 
-Remote storage availability must not determine whether local capture continues.
+```text
+10 GbE / 25 GbE / 40 GbE
+```
 
-## Current Scope
+The history-link speed is independent of the validated Stronghold FW forwarding/capture dataplane rating. A 25 GbE or 40 GbE history interface does not constitute a claim that the firewall dataplane itself has been validated at that rate.
 
-The current engineering scope is the capture foundation only:
+Completed FW capture segments and their associated records are transferred to Net-Hunter only after the required local finalization and integrity work. Net-Hunter independently verifies received history before acknowledging it as committed.
 
-- Wireshark-class physical-interface visibility
-- packet acquisition
-- packet-loss accounting
-- PCAPNG segment creation
-- segment finalization and integrity
-- capture/flow cataloging
-- storage tiering
-- resource-aware compression
-- retention
-- selective VLAN offload
-- capture query and export
+## Records
 
-Routing, VLAN configuration, subinterfaces, nftables policy enforcement, and FQDN policy objects are intentionally later phases.
+Raw PCAPNG is the authoritative packet history. Structured records make that history searchable, explainable, and correlatable.
+
+Stronghold FW should create the initial records that can be established while traffic is live, including interface observation, timestamps, MAC/VLAN context, flow/session facts, protocol/control-plane facts when safely decoded, firewall decisions, routing/NAT decisions, packet-loss state, and system/failure activity.
+
+Stronghold Net-Hunter may later enrich, correlate, and reprocess historical PCAP with improved decoders.
+
+Failure to recognize or decode a protocol must never cause the underlying packet to be discarded.
+
+## Stronghold Net-Hunter
+
+Stronghold Net-Hunter holds network history and provides the hunt/query system.
+
+Current platform direction:
+
+- FreeBSD;
+- ZFS;
+- jails;
+- large ECC RAM capacity;
+- NVMe for fast ingest/index/query workloads;
+- local SAS SSD for warm storage as required;
+- HBA-attached SAS storage for large ZFS historical PCAP capacity.
+
+The FreeBSD host owns hardware, HBAs, ZFS pools/datasets, host networking, PF, jail lifecycle, system updates, and hardware health. Application jails receive only the storage and network access required for their role.
+
+### Net-Hunter jails
+
+Net-Hunter currently has four defined application jails:
+
+1. **PCAP Data Ingest Jail** — receives capture segments and initial records from authorized Stronghold FW appliances, verifies transfer integrity/completeness, commits received history, and acknowledges verified receipt.
+2. **Record Processing Jail** — reads authoritative PCAP and FW records, constructs and enriches searchable records, correlates network/firewall history, builds indexes, and may reprocess older PCAP when decoders improve.
+3. **External User Interface Jail** — provides hunt, query, timeline, correlation, viewing, reporting, and controlled export. Authoritative Stronghold traffic history and records are read-only from this jail.
+4. **FW Configuration Backup Jail** — receives and preserves versioned Stronghold FW configuration backups. Access is restricted to authorized Stronghold FW appliances and a local Net-Hunter administrator; ordinary hunt/UI users and the other application jails do not receive access.
+
+### External UI read-only invariant
+
+> **The External User Interface may query, interpret, correlate, display, and export Stronghold history, but it may not alter authoritative PCAP, observation records, processed records, indexes, or firewall configuration history.**
+
+Writable UI storage, when required, is limited to non-authoritative material such as temporary session state, derived exports, reports, and download staging.
+
+## Current Engineering Scope
+
+The present implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance architecture is recorded now so early capture, record, storage, and transfer decisions do not block the intended complete system.
+
+Routing, VLAN configuration, subinterfaces, nftables policy enforcement, FQDN policy objects, Net-Hunter processing, and UI implementation remain later engineering work until explicitly brought into scope.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -95,7 +148,7 @@ Repository and implementation behavior for contributors and coding agents is def
 
 ## Project Status
 
-Stronghold is pre-release and under active development. Interfaces, schemas, storage behavior, capture implementation details, and architecture may change before a supported release.
+Stronghold is pre-release and under active development. Interfaces, schemas, storage behavior, capture implementation details, Net-Hunter internals, and architecture may change before a supported release.
 
 ## License
 
