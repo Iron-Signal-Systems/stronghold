@@ -4,7 +4,7 @@
 
 Phase 0 exists to prove that Stronghold can continuously capture configured interfaces, durably preserve traffic, truthfully report loss and degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
-Routing and firewall enforcement are not part of Phase 0.
+Routing, firewall enforcement, and HA clustering are not part of Phase 0.
 
 ### Capture Requirement #1 — Wireshark-class interface visibility
 
@@ -36,6 +36,8 @@ Define:
 - how the segment preserves Requirement #1 without requiring protocol recognition.
 
 The segment contract must leave room for the broader time architecture: stored wall-clock time is UTC, timestamp resolution must not be confused with accuracy, and later clock-confidence metadata must be able to accompany source history without changing captured packet authority.
+
+The segment identity/provenance model must also remain compatible with future HA: packet history belongs to the physical Stronghold node/interface that actually observed it, not merely to a future cluster virtual IP/MAC identity.
 
 ### 0.2 Segment and traffic catalog contracts
 
@@ -90,7 +92,7 @@ RAM is never classified as durable capture storage.
 
 The operating-system filesystem and PCAP filesystems must remain separated so capture-storage exhaustion cannot silently exhaust the root filesystem.
 
-Full customer retention classes, legal/investigative holds, manual destruction workflows, and archive administration remain later work; Phase 0 must simply avoid a storage model that contradicts those future controls.
+Full customer retention classes, legal/investigative holds, manual destruction workflows, archive administration, and HA storage reconciliation remain later work; Phase 0 must avoid a storage model that contradicts those future controls.
 
 ### 0.5 Capture resource-protection contract
 
@@ -109,7 +111,7 @@ Freeze the workload priority:
 
 Define the measurements that throttle or pause secondary work, including capture-ring occupancy, packet drops, CPU load, memory pressure, NVMe write latency/queue pressure, storage pressure, and transfer backlog.
 
-Future journal/retention work must obey the same resource rule: authoritative live capture may not be sacrificed merely to keep secondary journal transfer, enrichment, indexing, analytics, or retention processing current.
+Future journal/retention/HA work must obey the same capture-first rule. Future HA heartbeat/control may require reserved lightweight priority, but bulk HA state synchronization must never become a reason to sacrifice truthful packet capture.
 
 ### 0.6 Single-interface capture prototype
 
@@ -130,7 +132,7 @@ Arch Linux x86_64
 
 The prototype must capture observable traffic without protocol allowlisting.
 
-No compression, local tier movement, Net-Hunter transfer, routing, firewall code, remote identity integration, PKI enrollment, complete journal subsystem, or complete retention/hold subsystem is required for this slice.
+No compression, local tier movement, Net-Hunter transfer, routing, firewall code, remote identity integration, PKI enrollment, complete journal subsystem, complete retention/hold subsystem, or HA cluster implementation is required for this slice.
 
 ### 0.7 Multi-interface capture
 
@@ -266,13 +268,29 @@ legal/investigative/administrative holds
 controlled and journaled destruction
 future archive lifecycle
 Net-Hunter capacity forecasting/pressure handling
+optional active/standby Stronghold FW HA
+stable Stronghold Cluster ID
+cluster-owned virtual IP/MAC forwarding identity
+node-local physical capture provenance
+routed/VLAN and transparent-bridge HA ownership
+cluster versus node-local configuration
+cluster configuration synchronization
+session/NAT/WAN state synchronization
+HA heartbeat/control separated from bulk state sync
+conservative promotion/fencing and split-brain prevention
+manual failover and maintenance state
+HA System/Health and Administrative journal history
 complete Net-Hunter processing/hunt system
 ```
 
-The intended journal domains are separate Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, and Hunter Processing journals. They are not one generic mutable logfile. Exact schemas, durability boundaries, cryptographic advancement/integrity mechanisms, transfer batching, and retention contracts remain future engineering work.
+HA is intentionally not treated as one generic feature. Later HA gates must separately validate forwarding failover, configuration synchronization, state/session continuity, split-brain prevention, cluster virtual identity ownership, capture continuity/gaps, interrupted local-history reconciliation, and journal truthfulness.
 
-Retention eligibility is not destruction authority. Holds override normal expiration, and storage pressure must not silently create a destructive policy or cause Hunter to ACK history it did not durably commit.
+The HA interface role is distinct from PRODUCTION, WAN, MANAGEMENT, and HISTORY. Net-Hunter is not a required HA witness/quorum dependency.
 
-The exact implementation phase sequence for those later capabilities is intentionally **not frozen yet**. The complete product architecture is still being defined before the later roadmap is decomposed into implementation gates.
+The intended journal domains remain separate Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, and Hunter Processing journals. They are not one generic mutable logfile.
+
+Retention eligibility is not destruction authority. Holds override normal expiration, and storage pressure must not silently create destructive policy or cause Hunter to ACK history it did not durably commit.
+
+The exact implementation phase sequence for these later capabilities is intentionally **not frozen yet**. The complete product architecture is still being defined before the later roadmap is decomposed into implementation gates.
 
 Those capabilities must not be pulled into Phase 0 without explicit approval.
