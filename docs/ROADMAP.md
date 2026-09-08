@@ -35,6 +35,8 @@ Define:
 - what constitutes a successfully durable and verified segment; and
 - how the segment preserves Requirement #1 without requiring protocol recognition.
 
+The segment contract must leave room for the broader time architecture: stored wall-clock time is UTC, timestamp resolution must not be confused with accuracy, and later clock-confidence metadata must be able to accompany source history without changing captured packet authority.
+
 ### 0.2 Segment and traffic catalog contracts
 
 Define the segment catalog used to locate packet data.
@@ -44,6 +46,8 @@ Define the initial traffic/flow catalog used to answer what traffic occurred.
 Avoid per-packet database records unless a later measured requirement justifies them.
 
 Unknown or undecoded packets remain authoritative capture content even when no protocol-specific flow enrichment is available.
+
+The catalog design must not force future Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, or Hunter Processing journals into one generic mutable logging store.
 
 ### 0.3 PCAPNG metadata contract
 
@@ -82,7 +86,7 @@ Freeze the workload priority:
 1. packet receive
 2. active PCAP writes
 3. segment finalization / essential integrity work
-4. essential observation/catalog state
+4. essential observation/catalog/source-history state
 5. local tier movement / backlog handling
 6. transfer to Net-Hunter
 7. compression where approved
@@ -90,6 +94,8 @@ Freeze the workload priority:
 ```
 
 Define the measurements that throttle or pause secondary work, including capture-ring occupancy, packet drops, CPU load, memory pressure, NVMe write latency/queue pressure, storage pressure, and transfer backlog.
+
+Future journal work must obey the same resource rule: authoritative live capture may not be sacrificed merely to keep secondary journal transfer, enrichment, indexing, or analytics current.
 
 ### 0.6 Single-interface capture prototype
 
@@ -110,7 +116,7 @@ Arch Linux x86_64
 
 The prototype must capture observable traffic without protocol allowlisting.
 
-No compression, local tier movement, Net-Hunter transfer, routing, or firewall code is required for this slice.
+No compression, local tier movement, Net-Hunter transfer, routing, firewall code, remote identity integration, PKI enrollment, or complete journal subsystem is required for this slice.
 
 ### 0.7 Multi-interface capture
 
@@ -197,11 +203,13 @@ FW finalized segment
     -> FW record acknowledgement
 ```
 
+The complete production history-link architecture uses mutually authenticated appliance identity, explicit FW↔Hunter authorization, and no plaintext fallback. The exact Phase 0 trust/enrollment slice and TLS profile must be frozen before transfer implementation; Phase 0 must not invent an insecure temporary protocol that contradicts the intended architecture.
+
 Net-Hunter unavailability must create an observable backlog/degraded condition without stopping local capture while local capacity remains available.
 
 A source segment must not be deleted merely because a network copy call returned successfully.
 
-The exact transfer protocol, trust/certificate model, and retry/backoff contract remain to be frozen before this engineering slice is implemented.
+The exact transfer protocol, Stronghold appliance PKI/enrollment details, peer-authorization mechanics, journal-batch transfer mechanics, retry/backoff behavior, and source/destination journal integrity contracts remain to be frozen before their applicable engineering slices are implemented.
 
 ## Phase 0 Exit Gate
 
@@ -213,7 +221,32 @@ The exit gate must include documented Wireshark/dumpcap reference visibility, La
 
 ## Later Phases
 
-Stronghold's broader architecture already anticipates Layer-2 bridging, Layer-3 routing, router-on-a-stick operation, default-deny security policy, early authorization, NAT, VLAN/zone/interface objects, FQDN policy, multi-WAN preference, transactional configuration generations, and the complete Net-Hunter processing/hunt system.
+Stronghold's broader architecture already anticipates:
+
+```text
+Layer-2 bridging
+Layer-3 routing
+router-on-a-stick operation
+default-deny security policy
+early authorization before normal routing/NAT work
+NAT
+VLAN / zone / interface objects
+FQDN policy
+multi-WAN preference
+transactional configuration generations
+local and enterprise administrative identity
+Active Directory authentication over LDAPS only
+RADIUS / TACACS+ integration
+MFA and role-based authorization
+stable Stronghold appliance identity
+mTLS FW↔Net-Hunter history trust
+explicit peer authorization/revocation
+UTC/monotonic clock and clock-confidence handling
+separate append-oriented journals
+complete Net-Hunter processing/hunt system
+```
+
+The intended journal domains are separate Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, and Hunter Processing journals. They are not one generic mutable logfile. Exact schemas, durability boundaries, cryptographic advancement/integrity mechanisms, transfer batching, and retention contracts remain future engineering work.
 
 The exact implementation phase sequence for those later capabilities is intentionally **not frozen yet**. The complete product architecture is still being defined before the later roadmap is decomposed into implementation gates.
 
