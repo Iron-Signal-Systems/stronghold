@@ -44,6 +44,10 @@ Administrative actions, system/health state, traffic decisions, trust changes, c
 
 Retention is policy-driven and separate for PCAP and each journal domain. Holds override ordinary expiration, and destruction is explicit, attributable, and journaled.
 
+> **High availability of forwarding does not imply uninterrupted packet-history continuity.**
+
+Stronghold treats forwarding availability, state synchronization, capture continuity, and historical durability as separate claims and records the actual outcome of each.
+
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
@@ -192,9 +196,10 @@ PRODUCTION
 WAN
 MANAGEMENT
 HISTORY
+HA
 ```
 
-`MANAGEMENT` and `HISTORY` interfaces are not ordinary production transit paths. Configuration validation must reject unsafe combinations such as a production default route through the history interface or placing the management interface in a production bridge domain.
+`MANAGEMENT`, `HISTORY`, and `HA` interfaces are not ordinary production transit paths. `HISTORY` is dedicated to FW↔Net-Hunter history transport; `HA` is dedicated to cluster heartbeat/control and state synchronization. Configuration validation must reject unsafe combinations such as a production default route through HISTORY/HA or placing MANAGEMENT/HA into a production bridge domain.
 
 ### FW configuration model
 
@@ -214,13 +219,81 @@ COMMIT
 NEW CONFIGURATION GENERATION
 ```
 
-Each committed generation represents the complete effective Stronghold configuration, including interfaces, VLANs, bridge domains, zones, routes, WAN preference, NAT, security policy, objects, management settings, and Hunter settings as applicable.
+Each committed generation represents the complete effective Stronghold configuration, including interfaces, VLANs, bridge domains, zones, routes, WAN preference, NAT, security policy, objects, management settings, Hunter settings, and HA cluster settings as applicable.
 
 Risky remote changes should support commit-confirmed protection with automatic rollback if the new management path is not confirmed.
 
 Rollback restores the content of a prior generation by creating a **new** generation; Stronghold does not rewrite historical generation identity.
 
 Successful committed generations are intended to be versioned in the isolated Net-Hunter FW Configuration Backup Jail.
+
+## Stronghold FW High Availability Direction
+
+Stronghold anticipates optional **active/standby** FW clustering. Active/active forwarding is not the initial HA model.
+
+Each node retains its own:
+
+```text
+Stronghold Appliance ID
+physical NIC/MAC identity
+management identity
+history identity
+HA identity
+local storage
+clock state
+source journals
+capture provenance
+```
+
+The pair also has a stable **Stronghold Cluster ID**. Cluster-owned forwarding identities—such as routed gateway addresses, static WAN identities, and virtual MACs where required—belong to whichever node is ACTIVE.
+
+```text
+FW-A ACTIVE   ← HA heartbeat/control/state sync →   FW-B STANDBY
+```
+
+Routed/VLAN deployments use cluster-owned virtual gateway identity. Transparent Layer-2 HA uses explicit bridge ownership so only one cluster path forwards and the standby does not create an L2 loop.
+
+Failover changes runtime ownership, not configuration generation. If both nodes are synchronized on configuration generation `412`, promotion of FW-B still runs generation `412`.
+
+### HA configuration and state
+
+Cluster-level configuration and node-local configuration remain distinct. Policy, VLAN/zone/route/NAT/WAN and virtual forwarding identity are primarily cluster configuration; Appliance ID, management addressing, physical NIC/PCI mapping, storage, and node certificates remain node-specific.
+
+The active node synchronizes operational state needed for stateful failover, including firewall connection state, NAT mappings, timers, selected WAN/session binding, and other justified session state. Synchronization has explicit sequence/health such as `IN_SYNC`, `MINOR_LAG`, `DEGRADED`, `OUT_OF_SYNC`, or `UNKNOWN`.
+
+Stronghold may preserve synchronized sessions when network identity and protocol conditions permit, but does not claim universal seamless session survival.
+
+### HA control and split-brain prevention
+
+Heartbeat/control and bulk state synchronization are logically separate. HA control remains lightweight and high priority; bulk state replication may throttle under load and must not starve heartbeat/control.
+
+> **Loss of peer communication is not, by itself, proof that the peer is dead.**
+
+A standby does not claim cluster forwarding identity merely because one heartbeat path failed. Promotion requires the future fencing/election contract to establish that the node may safely own cluster identity.
+
+> **A standby must not claim ACTIVE cluster identity until the fencing/election contract permits promotion.**
+
+Stronghold prefers preventing simultaneous cluster ownership over aggressive failover when ownership cannot be established safely. Net-Hunter is not a required HA witness or quorum dependency.
+
+A secondary peer-observation path, such as the management network, may help distinguish a failed HA cable from a failed peer, but secondary reachability alone does not prove death or authorize promotion.
+
+### Capture continuity during HA
+
+HA state synchronization is not a mandatory real-time duplicate PCAP stream. The ACTIVE FW captures locally and hands verified history to Net-Hunter according to the normal history path.
+
+Each node records only traffic actually presented to that node's qualified capture path. Virtual cluster MAC/IP ownership is forwarding identity, not capture identity.
+
+If a node fails with untransferred history, that history remains attributable to the failed node and is reconciled after recovery where possible. An interrupted PCAP segment is recovered/finalized or marked unrecoverable according to the later segment-recovery contract; it is not silently discarded because it was open during failure.
+
+A successful forwarding failover does not justify a claim of zero packet-history loss. Any observation/capture gap remains explicit.
+
+### HA operation and journaling
+
+Planned manual failover and a `MAINTENANCE` node state are supported architectural directions. HA runtime history belongs primarily in the System/Health Journal, while human-triggered failover/maintenance actions also belong in the Administrative Journal.
+
+HA history should distinguish events such as peer loss, sync lag/out-of-sync state, promotion start/block, fencing failure, role transition, virtual identity assumption, manual failover, maintenance, and failover completion.
+
+Dynamic-WAN HA for DHCP/PPPoE or other protocol-bound WAN identity requires a later protocol-specific contract; initial HA architecture assumes static or otherwise cluster-transferable forwarding identity.
 
 ## Administrative Identity and Authorization
 
@@ -253,7 +326,7 @@ export packet history
 
 Viewing Hunter history does not imply permission to export packet data, and access to Net-Hunter does not imply authority to administer Stronghold FW.
 
-Normal remote administration is expected to enter through the `MANAGEMENT` role/interface and may be restricted to explicitly configured management source networks/hosts. The `HISTORY` interface is not a normal administrative login path.
+Normal remote administration is expected to enter through the `MANAGEMENT` role/interface and may be restricted to explicitly configured management source networks/hosts. The `HISTORY` and `HA` interfaces are not normal administrative login paths.
 
 ## Appliance Identity and History-Link Trust
 
@@ -305,7 +378,7 @@ Administrative Journal
 
 System / Health Journal
     interface/NIC state, capture loss, storage, services,
-    Hunter availability, route/WAN health, ZFS/jail health
+    Hunter availability, route/WAN health, HA state, ZFS/jail health
 
 Traffic Decision Journal
     authorization, bridge/route, firewall, NAT, WAN selection,
@@ -456,9 +529,9 @@ Writable UI storage, when required, is limited to non-authoritative material suc
 
 ## Current Engineering Scope
 
-The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, retention, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
+The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, retention, HA, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
 
-Later networking/enforcement phase sequencing is intentionally not frozen yet.
+Later networking/enforcement/HA phase sequencing is intentionally not frozen yet.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
