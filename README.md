@@ -40,6 +40,10 @@ Stronghold never assumes that a destination or service may use an alternate WAN 
 
 Administrative actions, system/health state, traffic decisions, trust changes, clock events, and Net-Hunter processing activity are preserved in separate append-oriented journals. Corrections and superseding state create new entries rather than silently rewriting prior history.
 
+> **Expiration eligibility is not permission to delete.**
+
+Retention is policy-driven and separate for PCAP and each journal domain. Holds override ordinary expiration, and destruction is explicit, attributable, and journaled.
+
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
@@ -330,6 +334,61 @@ Stronghold should explicitly preserve states such as `NOT_PERFORMED`. For exampl
 
 Net-Hunter preserves source FW journal identity/ordering and appends its own Hunter-side journal entries; it does not rewrite the originating FW history.
 
+## Retention, Holds, and Controlled Destruction
+
+Stronghold applies retention independently to authoritative PCAP and to each journal domain. PCAP retention does not silently determine Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, or Hunter Processing Journal retention.
+
+Retention policies may use explicit retention classes attached to configured objects or scope such as appliance, site, VLAN, zone, or other approved administrative context. Stronghold must not make destructive retention decisions depend on unproven deep-packet classification merely because a parser can derive a label.
+
+The retention lifecycle is conceptually:
+
+```text
+CREATE
+  ↓
+ACTIVE
+  ↓
+RETAINED
+  ↓
+ELIGIBLE_FOR_EXPIRATION
+  ↓
+AUTHORIZED_DESTRUCTION
+  ↓
+DESTROYED
+  ↓
+DESTRUCTION JOURNALED
+```
+
+A legal, investigative, or administrative hold overrides ordinary expiration. Creating, changing, and releasing a hold is itself an Administrative Journal event.
+
+Destruction must be attributable. Retention-driven and manual destruction are distinct actions, and manual destructive actions require explicit privileged authorization and a reason. The architecture leaves room for stronger controls such as MFA reauthentication or dual authorization without requiring them for every initial deployment.
+
+Destruction does not erase the fact that history once existed. The remaining journal history should preserve the applicable object identity, original capture/time range where relevant, original integrity identity/hash where safe and required, destruction authority, reason/policy, and destruction time/order.
+
+### FW storage pressure
+
+Stronghold FW exposes explicit storage-pressure states such as:
+
+```text
+NORMAL
+HIGH
+URGENT
+CRITICAL
+```
+
+Pressure may throttle/pause secondary work and accelerate safe movement/transfer, but it does not silently invent a new retention policy.
+
+Acknowledged history that Net-Hunter has independently verified and committed is safer to expire locally than unacknowledged history. By default, Stronghold must not automatically delete unacknowledged authoritative FW history merely to hide storage pressure.
+
+If local storage becomes exhausted and durable capture can no longer continue, Stronghold reports a real capture/history gap while continuing routing/firewall operation where possible. A full disk is a failure condition, not permission to claim continuity that did not occur.
+
+### Net-Hunter storage pressure
+
+Net-Hunter should expose FAST/WARM/HISTORY utilization, ingest rate, expiration rate, net growth, backlog, and projected capacity where sufficient data exists.
+
+Hunter pressure should first preserve ingest and verification while reducing nonessential processing and advancing only already-authorized retention work. If Hunter cannot durably commit new history, it must not ACK that history; the FW retains backlog locally according to the existing handoff contract.
+
+Moving history to a future archive is a lifecycle transition, not destruction, and must preserve identity, integrity, and lineage.
+
 ## FW storage direction
 
 ```text
@@ -397,7 +456,7 @@ Writable UI storage, when required, is limited to non-authoritative material suc
 
 ## Current Engineering Scope
 
-The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
+The implementation roadmap still begins with the Stronghold FW capture foundation. The broader dual-appliance, networking, policy, routing, identity, trust, time, journal, retention, and configuration architecture is recorded now so early implementation choices do not block the intended complete system.
 
 Later networking/enforcement phase sequencing is intentionally not frozen yet.
 
