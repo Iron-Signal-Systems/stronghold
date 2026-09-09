@@ -12,6 +12,8 @@ The governing rule is:
 
 A session that was valid under an earlier policy generation does not retain permission merely because it already exists.
 
+`docs/POLICY-SIMULATION.md` governs non-mutating pre-commit simulation of these same reconciliation outcomes and expected-versus-actual comparison after activation.
+
 ## Current Policy Generation Is Authoritative
 
 Stronghold security policy is explicit-allow/default-deny and evaluated lowest-position-first, first match wins.
@@ -77,6 +79,8 @@ VALIDATE
     ↓
 SHOW DIFF
     ↓
+DRY RUN / EXPECTED IMPACT
+    ↓
 AUTHORIZED SAVE / COMMIT
     ↓
 NEW POLICY GENERATION BECOMES AUTHORITATIVE
@@ -90,9 +94,13 @@ re-evaluate against new generation
 REBIND / RESTART_REQUIRED / TERMINATE
     ↓
 RECONCILIATION COMPLETE
+    ↓
+POST-COMMIT ACTUAL IMPACT
 ```
 
 New traffic must not continue using the prior generation while existing-session reconciliation is running.
+
+Dry Run does not create the authoritative generation and does not perform real reconciliation. It predicts the outcomes defined in this document using the candidate and available current facts.
 
 ## Reconciliation Outcomes
 
@@ -149,6 +157,16 @@ new policy allows
 old dataplane state is reusable
 ```
 
+These same outcome classes are used by Dry Run as predictive categories:
+
+```text
+WOULD REBIND
+WOULD RESTART
+WOULD TERMINATE
+```
+
+A predicted outcome is not recorded as though the actual runtime event occurred.
+
 ## Rule Move and Rule Removal Semantics
 
 Rule movement is an enforcement change, not a cosmetic configuration operation.
@@ -188,6 +206,8 @@ old session remains authorized
 ```
 
 The outcome is determined by the current policy generation.
+
+Before finalization, Dry Run should be able to estimate the same consequences against current session facts so the operator can see likely rebinding, restart, and termination counts before activation.
 
 ## Runtime Policy Lifecycle
 
@@ -230,6 +250,8 @@ Sessions Remaining: 0
 
 Historical policy identity remains queryable after removal.
 
+Simulation state is not a runtime lifecycle state for the production policy. A candidate policy that is being simulated does not become `ACTIVE` merely because a Dry Run completed.
+
 ## Policy and Session Counters
 
 Stronghold should expose enough policy runtime information to establish whether a policy change has fully taken effect.
@@ -259,6 +281,14 @@ Exact counter names and storage model remain implementation work.
 
 The operator must be able to distinguish a policy that is merely absent from the candidate/running text from a policy whose live runtime state has actually been cleaned up.
 
+Simulation matches/counters must remain separate from production counters.
+
+```text
+simulation match
+!=
+production policy hit
+```
+
 ## Termination and Reconciliation Reasons
 
 Stronghold should preserve explicit reasons rather than collapse all session loss into timeout/reset.
@@ -279,6 +309,34 @@ ADMINISTRATIVE_TERMINATION
 
 Exact vocabulary remains to be frozen with the implementation schema.
 
+Simulation may predict these reason classes, but prediction must remain clearly distinguishable from an actual termination/reconciliation record.
+
+## Pre-Commit Candidate Impact
+
+Stronghold should allow a candidate to be evaluated against current sessions before finalization without mutating those sessions.
+
+Potential output includes:
+
+```text
+Candidate Impact Estimate
+
+Sessions Evaluated:  8,421
+Unaffected:          7,982
+Would Rebind:          366
+Would Restart:          29
+Would Terminate:        12
+```
+
+The simulator may also explain rule-order changes, default-deny results, NAT/WAN changes, route effects, object dependency effects, and FQDN/IPv4/IPv6 family differences according to `docs/POLICY-SIMULATION.md`.
+
+A simulation is bound to the candidate/base/runtime context used to produce it and can become stale before activation.
+
+```text
+candidate impact estimate
+!=
+future runtime guaranteed
+```
+
 ## Post-Commit Impact
 
 Stronghold should make the operational consequences of a configuration generation visible while the administrator still has context for the change.
@@ -296,6 +354,7 @@ newly denied flows
 top affected sources/destinations/services
 first affected observation time
 reconciliation status
+expected-versus-actual divergence
 ```
 
 This is observation/reporting, not an automatic declaration that the administrator's change was good or bad.
@@ -308,6 +367,23 @@ configuration accepted
 operational intent proven correct
 ```
 
+Where a pre-commit Dry Run exists, Stronghold should be able to compare the predicted reconciliation/traffic effects with actual observed behavior after activation.
+
+Example:
+
+```text
+SIMULATION EXPECTED:
+    0 new denies
+
+ACTUAL SINCE COMMIT:
+    38 newly denied flows
+
+ATTENTION:
+    observed impact differs from simulation
+```
+
+This warning does not itself declare the change wrong or trigger rollback.
+
 ## Packet-History Correlation
 
 Stronghold's capture-first architecture should allow a policy change to be correlated with near-real-time observed traffic and decision history.
@@ -315,6 +391,10 @@ Stronghold's capture-first architecture should allow a policy change to be corre
 Conceptually:
 
 ```text
+PRE-COMMIT SIMULATION
+        ↓
+EXPECTED IMPACT
+        ↓
 CONFIGURATION GENERATION CHANGE
         ↓
 RUNTIME RECONCILIATION
@@ -324,21 +404,27 @@ NEW ALLOW / DENY DECISIONS
 SOURCE / DESTINATION / SERVICE
         ↓
 AUTHORITATIVE PACKET HISTORY
+        ↓
+EXPECTED vs ACTUAL
 ```
 
 An operator investigating a change should be able to determine, subject to capture/history availability:
 
 ```text
 what configuration changed
+what Stronghold predicted before activation
 which Policy IDs changed
 which sessions were affected
 which new flows were allowed/denied afterward
 what packets were actually presented
 what Stronghold decided
 what Stronghold actually did
+where observed behavior differed from prediction
 ```
 
 This enables prompt discovery of mistaken rule movement/removal instead of waiting for long-lived client sessions to close hours later.
+
+Simulation output is not authoritative packet history or an actual traffic decision.
 
 ## Rollback and Reconciliation
 
@@ -356,7 +442,7 @@ Generation 843    restore content based on 841
 
 Generation 842 remains part of history.
 
-Generation 843 triggers the same current-generation reconciliation contract as any other commit.
+Generation 843 triggers the same current-generation reconciliation contract as any other commit and may itself be Dry Run simulated before finalization.
 
 ## HA
 
@@ -374,6 +460,8 @@ A standby must not silently preserve sessions under authorization that the activ
 
 Exact synchronization, failover-during-reconciliation, and termination propagation behavior remain later qualification work.
 
+Simulation that consumes HA state must identify the state source/freshness and must not claim active-node impact from stale standby data.
+
 ## Resource Protection
 
 Policy reconciliation must be bounded and must not undermine Stronghold's capture-first resource priorities.
@@ -381,6 +469,8 @@ Policy reconciliation must be bounded and must not undermine Stronghold's captur
 A large policy change may create substantial reconciliation work. Stronghold must expose backlog/progress truthfully rather than silently starving capture or claiming cleanup complete before it is complete.
 
 If reconciliation cannot keep pace, Stronghold must expose a degraded/lagging state and continue to apply the current policy generation to new traffic.
+
+Dry Run can also be computationally expensive. Simulation is secondary work and must not starve packet acquisition, durable PCAP writes, live enforcement, essential journal durability, HA heartbeat/control, or critical management recovery paths.
 
 ## Truth Separations
 
@@ -390,6 +480,10 @@ old policy permitted                   != current policy permits
 rule removed                           != runtime state cleaned up
 rule moved                             != cosmetic change
 new allow match                        != old dataplane state reusable
+simulation predicts REBOUND            != session actually rebound
+simulation predicts TERMINATE          != session actually terminated
+simulation match                       != production policy hit
+candidate impact estimate              != post-commit observed impact
 policy generation activated            != reconciliation complete
 configuration accepted                 != operational intent proven correct
 session terminated                     != packet history lost
@@ -399,4 +493,4 @@ current session count zero             != policy never matched historically
 
 ## Scope
 
-This document freezes architecture only. It does not pull the state engine, conntrack implementation, session schema, HA state synchronization, policy-impact analytics, or post-commit UI into Phase 0.
+This document freezes architecture only. It does not pull the state engine, conntrack implementation, session schema, HA state synchronization, policy simulator, policy-impact analytics, or post-commit UI into Phase 0.
