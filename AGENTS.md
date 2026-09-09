@@ -11,6 +11,7 @@ This file defines how contributors, coding agents, and automation work within th
 - `docs/OBSERVABILITY.md`
 - `docs/SUPPORT-DIAGNOSTICS.md`
 - `docs/IDS-INSPECTION.md`
+- `docs/SECURE-ACCESS.md`
 - `docs/ROADMAP.md`
 
 ## Governing Principles
@@ -22,6 +23,8 @@ This file defines how contributors, coding agents, and automation work within th
 > **Denied traffic should be cheap to reject, but never invisible.**
 
 > **Path availability is not path permission.**
+
+> **A secure tunnel is a protected path, not authorization to use every resource behind it.**
 
 > **Stronghold operational history is journaled, not treated as an overwriteable catch-all log.**
 
@@ -61,6 +64,8 @@ maintain local history backlog
 optionally participate in active/standby HA
 transfer verified history to Net-Hunter
 future selective TLS/application proxying only where explicitly configured
+future zero-trust remote-access PEP / WireGuard termination
+future L2TPv3/IPsec site-to-site / branch-office tunnel termination
 ```
 
 ### Stronghold Net-Hunter
@@ -81,9 +86,10 @@ export
 preserve FW configuration backups
 manage authorized retention / holds / archive lifecycle
 future isolated IDS/inspection analysis
+future secure-access history/session correlation
 ```
 
-Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, or HA quorum/fencing. Future IDS/inspection processing also does not silently become a synchronous forwarding dependency.
+Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, secure-access policy enforcement, or HA quorum/fencing. Future IDS/inspection processing also does not silently become a synchronous forwarding dependency.
 
 ## Three Categories of Truth
 
@@ -104,6 +110,8 @@ Derived data remains traceable to authoritative source data. Reprocessing may cr
 
 Future decrypted inspection material is non-authoritative derived processing input. The authoritative packet history remains the original wire PCAP.
 
+Secure-access session/tunnel correlation on Hunter is derived interpretation around authoritative source traffic and FW journals; it does not rewrite the original observation or decision history.
+
 ## Capture Rules
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
@@ -120,7 +128,7 @@ AF_XDP availability, native-driver operation, zero-copy capability, and Strongho
 
 Keep the Phase 0 XDP program minimal and measurable. XDP/eBPF does not become a second policy/enforcement engine before the authoritative capture path is proven.
 
-Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, and other secondary activity.
+Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, future secure-access control/tunnel housekeeping, and other secondary activity.
 
 ## Authorization and Forwarding Rules
 
@@ -142,7 +150,7 @@ authorize
           final egress
 ```
 
-Do not let route availability, NAT, FQDN association, WAN reachability, HA membership, or future IDS availability grant security permission.
+Do not let route availability, NAT, FQDN association, WAN reachability, HA membership, future IDS availability, WireGuard peer state, L2TPv3 state, or IPsec SA state grant security permission.
 
 A route/FIB lookup may establish a needed fact but MUST NOT itself constitute authorization.
 
@@ -173,6 +181,8 @@ A future qualified high-throughput profile may add a dedicated `INSPECTION` inte
 Routing is longest-prefix first, then equal-prefix source preference `STATIC`, `CONNECTED`, `DEFAULT`, `DYNAMIC`, then health, metric, deterministic tie-break.
 
 NAT is separate from authorization. WAN eligibility is explicit per destination/service.
+
+Future zero-trust remote access and site-to-site/branch-office tunneling must integrate with the same Stronghold networking/policy authority rather than creating an independent hidden routing/policy system.
 
 ## Common Truth Separations
 
@@ -268,6 +278,18 @@ IDS storage unavailable            != permission to spool plaintext
 IDS unavailable                    != production forwarding unavailable
 deep detection                     != inline enforcement
 inspection configured              != inspection coverage complete
+WireGuard peer authenticated       != user authenticated
+user authenticated                 != device authorized
+device authorized                  != resource authorized
+WireGuard tunnel established       != resource authorized
+resource authorized                != connection succeeded
+AllowedIPs configured              != Stronghold resource authorization
+Access Session created             != application connection succeeded
+REVOKE issued                      != revocation fully enforced
+L2TPv3 tunnel established          != site authorized
+IPsec SA established               != traffic authorized
+remote network reachable           != remote network permitted
+site tunnel healthy                != application connection succeeded
 ```
 
 ## Failure-State Discipline
@@ -294,6 +316,10 @@ configuration_drift
 inspection_bypassed
 inspection_unsupported
 inspection_feed_gap
+access_session_expired
+access_session_revoked
+resource_not_authorized
+site_tunnel_down
 ```
 
 Do not infer success from absence of error. A later successful retry does not erase a failed operation.
@@ -323,7 +349,7 @@ High-volume journals may use durable batch commits while preserving per-entry se
 
 Periodic signed checkpoints/finalized journal segments authenticate heads; do not require expensive asymmetric signatures for every event.
 
-Journal-signing credentials are purpose-separated from TLS/history/HA and future IDS/inspection transport credentials.
+Journal-signing credentials are purpose-separated from TLS/history/HA, future IDS/inspection transport credentials, WireGuard peer credentials, and future site-tunnel credentials.
 
 Normal reboot continues an existing verified journal. Catastrophic continuity failure creates an explicit gap/new epoch rather than silently restarting the chain as though nothing happened.
 
@@ -366,6 +392,8 @@ Promotion evaluates health, path readiness, peer evidence, fencing/election, con
 Net-Hunter is not HA quorum/witness.
 
 Successful forwarding failover does not justify a zero-capture-gap claim.
+
+Future secure-access HA must separately validate WireGuard/Access Session behavior and L2TPv3/IPsec tunnel failover/rekey state; ordinary forwarding failover does not prove secure-access continuity.
 
 ## Appliance Update Rules
 
@@ -433,6 +461,8 @@ Key rotation does not prove previously protected data was never exposed.
 
 Future IDS persistence uses a dedicated encrypted-at-rest inspection domain. The Hunter host owns ZFS/key-management authority; the IDS jail does not.
 
+Future WireGuard and L2TPv3/IPsec credentials/keys remain purpose-separated from appliance identity, journal signing, HISTORY, HA, and IDS/inspection credentials.
+
 ## Platform Trust Rules
 
 Distinguish logical Appliance ID, hardware/root-of-trust identity, certificate identity, and platform-trust state.
@@ -459,7 +489,7 @@ NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, AF_
 
 Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, 64-byte packet stress, and truthful loss accounting.
 
-Capture-only throughput is not a claim for full-feature stateful/NAT/HA or future TLS-inspection operation.
+Capture-only throughput is not a claim for full-feature stateful/NAT/HA, future TLS-inspection, or future secure-access operation.
 
 Node performance is not cluster performance. HA qualification measures failover stages and capture/session/journal outcomes separately.
 
@@ -552,6 +582,8 @@ Secret configuration is not ordinarily readable back in plaintext.
 
 Preserve diagnose/test/repair behavioral distinctions.
 
+Future WireGuard, L2TPv3, and IPsec native state remain implementation state below Stronghold and must not become a second unmanaged configuration authority.
+
 ## Observability / Alerting Rules
 
 `docs/OBSERVABILITY.md` defines the governing observability architecture.
@@ -559,6 +591,8 @@ Preserve diagnose/test/repair behavioral distinctions.
 Health is domain-specific. Keep capture, PCAP durability, forwarding, policy, routing, WAN, HA, Hunter/history transfer, journals, time, trust, storage, hardware, and platform/update state independently observable.
 
 Future IDS/inspection health is separate from capture/forwarding health. Inspection coverage, feed gaps, proxy state, IDS jail state, and inspection storage state must not be hidden by otherwise healthy forwarding.
+
+Future secure-access health is also separate: PE/PA/PEP, identity/MFA/posture dependencies, WireGuard session state, Access Session lifecycle, L2TPv3 state, IPsec SA/rekey state, and site-tunnel health must not be collapsed into one `VPN_UP` bit.
 
 Do not infer subsystem health from process uptime or interface-link state.
 
@@ -606,6 +640,31 @@ Vendor-supported hardware/firmware does not automatically equal Stronghold-quali
 
 Vendor OOB access must not become a hidden path over PRODUCTION, HISTORY, or HA.
 
+## Deferred Secure Access Rules
+
+`docs/SECURE-ACCESS.md` defines the governing future secure-access architecture.
+
+**Implementation remains deferred.** Do not implement a production Stronghold Access Agent, complete zero-trust PE/PA/PEP subsystem, WireGuard remote-access lifecycle, posture engine, L2TPv3/IPsec site tunnel, or secure-access HA/failover behavior without later explicit approval and phase placement.
+
+The following architecture boundaries are already mandatory for any future implementation:
+
+- remote/user access follows the NIST SP 800-207 Policy Engine / Policy Administrator / Policy Enforcement Point control-model direction;
+- WireGuard is the core secure remote-access transport/data plane, not the Stronghold authorization database;
+- WireGuard peer authentication and `AllowedIPs` never substitute for user/device/resource authorization;
+- Stronghold Access Session state binds the transport peer to user, device, authentication/MFA/posture, policy generation, resource, service, duration, and authorization state as applicable;
+- GRANT, DENY, and REVOKE are first-class control-plane outcomes;
+- the Policy Administrator creates/removes authorized access-session and transport state according to Policy Engine decisions;
+- Stronghold FW acts as the Policy Enforcement Point and applies normal Stronghold firewall authorization to tunneled traffic;
+- resource-scoped authorization is preferred over granting broad internal network access merely because a tunnel is established;
+- site-to-site / branch-office tunneling is a separate architecture from zero-trust remote access;
+- site-to-site / branch-office direction uses L2TPv3 protected by IPsec;
+- L2TPv3 tunnel state, IPsec SA state, remote reachability, and bridge/route availability never independently grant security permission;
+- site/tunnel identity remains separate from current endpoint addressing and cryptographic session state;
+- native WireGuard/L2TPv3/IPsec configuration does not become a second Stronghold configuration authority;
+- secure-access operations remain observable, attributable, and journaled;
+- Hunter correlation is optional derived analysis and does not become a runtime secure-access dependency;
+- secure-access implementation remains subordinate to capture-first resource and qualification rules.
+
 ## Deferred IDS / TLS Inspection Rules
 
 `docs/IDS-INSPECTION.md` defines the governing future inspection architecture.
@@ -649,28 +708,30 @@ FW priority intent:
 8. HA bulk state sync
 9. authoritative Hunter HISTORY transfer
 10. compression where approved
-11. future transient IDS inspection transport / deep analytics / observability / support work outside live path
+11. future transient IDS inspection transport / secure-access control housekeeping / deep analytics / observability / support work outside live path
 ```
 
-Exact future ordering among secondary work must be qualified by measurement, but transient IDS work never outranks authoritative capture/history merely because detection is enabled.
+Exact future ordering among secondary work must be qualified by measurement. Transient IDS work and secure-access control-plane/background work never outrank authoritative capture/history merely because those features are enabled.
 
-Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, future IDS processing, and analytics must throttle rather than hide capture loss.
+Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, future IDS processing, secure-access housekeeping, and analytics must throttle rather than hide capture loss.
 
 ## Explicit Deferrals
 
-**VPN is deferred. IDS/IPS implementation is deferred.**
+**Secure-access implementation is deferred. IDS/IPS implementation is deferred.**
+
+The future secure-access architecture is defined in `docs/SECURE-ACCESS.md`, but no production Access Agent, complete PE/PA/PEP implementation, WireGuard lifecycle, posture engine, L2TPv3/IPsec implementation, interoperability profile, or complete secure-access HA/failover contract is approved for implementation now.
 
 The future inspection architecture is defined in `docs/IDS-INSPECTION.md`, but no IDS/IPS engine, detection ruleset, complete proxy implementation, QUIC implementation, complete fail-open/fail-closed contract, or IPS enforcement model is approved for implementation now.
 
-Nothing built now should weaken authoritative PCAP capture or make detection a current Phase 0 dependency.
+Nothing built now should weaken authoritative PCAP capture or make secure access or detection a current Phase 0 dependency.
 
 ## Scope Discipline
 
 Implementation begins with FW Phase 0 Traffic Observation Foundation using AF_XDP as the packet-acquisition foundation.
 
-Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Phase 0 may establish reproducible AF_XDP capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/IDS systems early.
+Phase 0 may establish reproducible AF_XDP capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/secure-access/IDS systems early.
 
 Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
@@ -692,12 +753,14 @@ For Hunter search, the same test includes whether a `no results` answer came fro
 
 For management/health/support work, the same test includes whether the operator can distinguish intended configuration from runtime state, determine which responsibility is degraded, and identify what diagnostic/support action changed or did not change appliance state.
 
+For future secure access, the same test includes who/what requested access, which user/device/session/tunnel identity was established, what resource/site was authorized, which policy generation decided it, whether the secure path was actually established, whether access was granted/denied/revoked, whether revocation completed, and what traffic was actually permitted or failed.
+
 For future IDS/inspection, the same test includes whether traffic was selected, successfully proxied, bypassed/unsupported, delivered to the IDS jail, dropped from the inspection feed, processed, and retained only according to the configured encrypted persistence policy.
 
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable AF_XDP/capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, and repository-write boundaries remain intact.
+Before proposing a change as complete, verify that applicable AF_XDP/capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future IDS/inspection, and repository-write boundaries remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide AF_XDP/capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide AF_XDP/capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
