@@ -12,6 +12,7 @@ This file defines how contributors, coding agents, and automation work within th
 - `docs/SUPPORT-DIAGNOSTICS.md`
 - `docs/IDS-INSPECTION.md`
 - `docs/SECURE-ACCESS.md`
+- `docs/ENDPOINT-ENFORCEMENT.md`
 - `docs/ROADMAP.md`
 
 ## Governing Principles
@@ -25,6 +26,8 @@ This file defines how contributors, coding agents, and automation work within th
 > **Path availability is not path permission.**
 
 > **A secure tunnel is a protected path, not authorization to use every resource behind it.**
+
+> **Endpoint ALLOW never grants network permission that Stronghold FW would otherwise deny.**
 
 > **Stronghold operational history is journaled, not treated as an overwriteable catch-all log.**
 
@@ -66,7 +69,25 @@ transfer verified history to Net-Hunter
 future selective TLS/application proxying only where explicitly configured
 future zero-trust remote-access PEP / WireGuard termination
 future L2TPv3/IPsec site-to-site / branch-office tunnel termination
+future endpoint policy/control authority for managed Endpoint Agents
 ```
+
+### Stronghold Endpoint Enforcement
+
+Future Stronghold Endpoint Enforcement owns local endpoint enforcement responsibilities where implemented:
+
+```text
+Windows-first managed endpoint PEP
+Go service
+native Windows Filtering Platform integration
+signed endpoint policy generations
+user/device/application/resource-aware local enforcement
+local-network and future ZTNA integration
+endpoint decision records
+endpoint health / holdover / expiry state
+```
+
+The endpoint agent is an additional Policy Enforcement Point. It is not an independent Policy Engine, not an independent Stronghold configuration authority, not an EDR, and not a replacement for Stronghold FW authorization.
 
 ### Stronghold Net-Hunter
 
@@ -87,9 +108,10 @@ preserve FW configuration backups
 manage authorized retention / holds / archive lifecycle
 future isolated IDS/inspection analysis
 future secure-access history/session correlation
+future endpoint-enforcement correlation
 ```
 
-Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, secure-access policy enforcement, or HA quorum/fencing. Future IDS/inspection processing also does not silently become a synchronous forwarding dependency.
+Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, secure-access policy enforcement, endpoint local enforcement, or HA quorum/fencing. Future IDS/inspection processing also does not silently become a synchronous forwarding dependency.
 
 ## Three Categories of Truth
 
@@ -112,6 +134,8 @@ Future decrypted inspection material is non-authoritative derived processing inp
 
 Secure-access session/tunnel correlation on Hunter is derived interpretation around authoritative source traffic and FW journals; it does not rewrite the original observation or decision history.
 
+Endpoint enforcement records describe what the endpoint PEP decided/performed. They are not FW Traffic Decision Journal entries and are not authoritative physical-interface observations merely because Hunter later correlates them.
+
 ## Capture Rules
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
@@ -128,7 +152,7 @@ AF_XDP availability, native-driver operation, zero-copy capability, and Strongho
 
 Keep the Phase 0 XDP program minimal and measurable. XDP/eBPF does not become a second policy/enforcement engine before the authoritative capture path is proven.
 
-Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, future secure-access control/tunnel housekeeping, and other secondary activity.
+Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, future secure-access control/tunnel housekeeping, endpoint-policy/control housekeeping, and other secondary activity.
 
 ## Authorization and Forwarding Rules
 
@@ -150,7 +174,7 @@ authorize
           final egress
 ```
 
-Do not let route availability, NAT, FQDN association, WAN reachability, HA membership, future IDS availability, WireGuard peer state, L2TPv3 state, or IPsec SA state grant security permission.
+Do not let route availability, NAT, FQDN association, WAN reachability, HA membership, future IDS availability, WireGuard peer state, L2TPv3 state, IPsec SA state, or endpoint ALLOW state grant network security permission.
 
 A route/FIB lookup may establish a needed fact but MUST NOT itself constitute authorization.
 
@@ -183,6 +207,8 @@ Routing is longest-prefix first, then equal-prefix source preference `STATIC`, `
 NAT is separate from authorization. WAN eligibility is explicit per destination/service.
 
 Future zero-trust remote access and site-to-site/branch-office tunneling must integrate with the same Stronghold networking/policy authority rather than creating an independent hidden routing/policy system.
+
+Endpoint network context may consume Stronghold-observed zone/VLAN facts, but an endpoint must not self-assert a trusted VLAN/zone and thereby gain authorization.
 
 ## Common Truth Separations
 
@@ -290,6 +316,20 @@ L2TPv3 tunnel established          != site authorized
 IPsec SA established               != traffic authorized
 remote network reachable           != remote network permitted
 site tunnel healthy                != application connection succeeded
+endpoint allow                     != FW allow
+endpoint deny                      != FW observed deny
+endpoint policy installed          != FW policy installed
+endpoint PEP healthy               != FW PEP healthy
+application identified             != application trusted
+device on VLAN                     != device authorized
+endpoint VLAN claim                != network-side VLAN context established
+local network                      != trusted endpoint
+policy received                    != policy verified
+policy verified                    != policy activated
+policy activated                   != endpoint enforcement healthy
+cached policy                      != current control-plane policy
+WFP filter programmed              != connection successfully blocked
+connection locally denied          != packet observed by FW
 ```
 
 ## Failure-State Discipline
@@ -320,6 +360,10 @@ access_session_expired
 access_session_revoked
 resource_not_authorized
 site_tunnel_down
+endpoint_policy_holdover
+endpoint_policy_expired
+endpoint_enforcement_degraded
+endpoint_enforcement_failed
 ```
 
 Do not infer success from absence of error. A later successful retry does not erase a failed operation.
@@ -349,7 +393,7 @@ High-volume journals may use durable batch commits while preserving per-entry se
 
 Periodic signed checkpoints/finalized journal segments authenticate heads; do not require expensive asymmetric signatures for every event.
 
-Journal-signing credentials are purpose-separated from TLS/history/HA, future IDS/inspection transport credentials, WireGuard peer credentials, and future site-tunnel credentials.
+Journal-signing credentials are purpose-separated from TLS/history/HA, future IDS/inspection transport credentials, WireGuard peer credentials, future site-tunnel credentials, and any future endpoint-record signing identity.
 
 Normal reboot continues an existing verified journal. Catastrophic continuity failure creates an explicit gap/new epoch rather than silently restarting the chain as though nothing happened.
 
@@ -358,6 +402,8 @@ Hunter verifies FW journal linkage/checkpoints independently and preserves sourc
 Authorized journal retention may remove content only while preserving enough checkpoint/tombstone lineage to establish that the range existed and was deliberately destroyed.
 
 Use the term **append-oriented and cryptographically tamper-evident** unless a later WORM/witness design actually justifies stronger immutability claims.
+
+Endpoint-origin enforcement history is a separate source domain from FW journals until an exact integrity/journal model is frozen. Hunter correlation does not rewrite endpoint events as FW journal events.
 
 ## Retention / Hold / Destruction Rules
 
@@ -415,6 +461,8 @@ Standalone FW updates that interrupt service create real forwarding/capture outa
 
 FreeBSD/ZFS software update does not automatically authorize irreversible ZFS pool-feature enablement.
 
+Future Endpoint Agent updates require their own signed Windows installer/update lifecycle and must not be treated as FW appliance update state merely because both belong to Stronghold.
+
 ## Recovery / DR Rules
 
 Distinguish rebuildable platform, configuration, identity/trust, authoritative history, derived state, and transient runtime state.
@@ -463,6 +511,8 @@ Future IDS persistence uses a dedicated encrypted-at-rest inspection domain. The
 
 Future WireGuard and L2TPv3/IPsec credentials/keys remain purpose-separated from appliance identity, journal signing, HISTORY, HA, and IDS/inspection credentials.
 
+Future Endpoint Agent policy-signing/control credentials and endpoint identity credentials remain purpose-separated from WireGuard peer keys and appliance/Hunter journal identities.
+
 ## Platform Trust Rules
 
 Distinguish logical Appliance ID, hardware/root-of-trust identity, certificate identity, and platform-trust state.
@@ -477,6 +527,8 @@ An HA standby with unacceptable platform-trust state is not silently a normal pr
 
 Development, qualification, and supported production hardware are separate categories.
 
+Endpoint local-admin/root-equivalent tampering is a separate platform threat boundary. Stronghold must not claim impossible endpoint tamper immunity merely because the Endpoint Agent is signed or managed.
+
 ## Hardware Qualification Rules
 
 Stronghold claims apply to qualified appliance profiles, not arbitrary hardware that boots.
@@ -489,13 +541,15 @@ NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, AF_
 
 Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, 64-byte packet stress, and truthful loss accounting.
 
-Capture-only throughput is not a claim for full-feature stateful/NAT/HA, future TLS-inspection, or future secure-access operation.
+Capture-only throughput is not a claim for full-feature stateful/NAT/HA, future TLS-inspection, future secure-access, or endpoint-enforcement operation.
 
 Node performance is not cluster performance. HA qualification measures failover stages and capture/session/journal outcomes separately.
 
 Hunter capacity is not sustainable ingest. Qualify ingest, verify/hash, indexes, query, retrieval, reprocessing, retention, scrub/resilver, degraded-storage behavior, and future IDS processing separately.
 
 ECC remains required direction for Hunter and a strong FW production preference until exact profiles are frozen.
+
+Endpoint Windows compatibility/performance qualification is a separate matrix from FW appliance hardware qualification.
 
 ## Net-Hunter Rules
 
@@ -556,6 +610,8 @@ Distinguish transfer, ingest, processing, reprocessing, and index-rebuild backlo
 
 Where source PCAP remains retained, traffic-derived results preserve enough lineage to locate applicable source segments.
 
+Future endpoint-enforcement correlation may join endpoint decisions with Access Sessions, FW journals, and PCAP, but that correlation remains derived and does not rewrite the original sources.
+
 ## Management Plane Rules
 
 `docs/MANAGEMENT-PLANE.md` defines the governing management-plane architecture.
@@ -584,6 +640,8 @@ Preserve diagnose/test/repair behavioral distinctions.
 
 Future WireGuard, L2TPv3, and IPsec native state remain implementation state below Stronghold and must not become a second unmanaged configuration authority.
 
+Future Windows WFP filter state is endpoint implementation state below Stronghold policy. Direct local WFP/native changes do not silently become Stronghold endpoint-policy truth.
+
 ## Observability / Alerting Rules
 
 `docs/OBSERVABILITY.md` defines the governing observability architecture.
@@ -593,6 +651,8 @@ Health is domain-specific. Keep capture, PCAP durability, forwarding, policy, ro
 Future IDS/inspection health is separate from capture/forwarding health. Inspection coverage, feed gaps, proxy state, IDS jail state, and inspection storage state must not be hidden by otherwise healthy forwarding.
 
 Future secure-access health is also separate: PE/PA/PEP, identity/MFA/posture dependencies, WireGuard session state, Access Session lifecycle, L2TPv3 state, IPsec SA/rekey state, and site-tunnel health must not be collapsed into one `VPN_UP` bit.
+
+Future endpoint-enforcement health is separate from FW health and includes at least policy currentness/signature state, WFP programming/activation state, control-channel state, endpoint identity state, and local enforcement health where implemented.
 
 Do not infer subsystem health from process uptime or interface-link state.
 
@@ -665,6 +725,32 @@ The following architecture boundaries are already mandatory for any future imple
 - Hunter correlation is optional derived analysis and does not become a runtime secure-access dependency;
 - secure-access implementation remains subordinate to capture-first resource and qualification rules.
 
+## Deferred Endpoint Enforcement Rules
+
+`docs/ENDPOINT-ENFORCEMENT.md` defines the governing future endpoint-enforcement architecture.
+
+**Implementation remains deferred.** Do not implement a production Endpoint Agent, Windows Filtering Platform integration, endpoint policy-distribution system, endpoint decision-journal/integrity system, or deep endpoint Layer-7 component without later explicit approval and phase placement.
+
+The following architecture boundaries are already mandatory for any future implementation:
+
+- Windows is the initial endpoint direction;
+- the initial Endpoint Agent is a Go service using native Windows Filtering Platform enforcement rather than a competing user-space packet stack;
+- the Endpoint Agent is an endpoint Policy Enforcement Point, not an independent Policy Engine or Stronghold configuration authority;
+- endpoint `ALLOW` never grants network permission that Stronghold FW would otherwise deny;
+- endpoint `DENY` remains an endpoint fact and must not be represented as a FW-observed denial when the traffic never reached the FW;
+- endpoint policy uses signed, validated generations with explicit activation state;
+- policy receipt, verification, activation, and enforcement health remain separate states;
+- endpoint policy uses explicit lease/holdover/expiry semantics rather than silently removing enforcement when the control plane is unavailable;
+- endpoint self-reported VLAN/zone context never overrides Stronghold network-side context or creates trusted authorization;
+- user/device/application/resource-aware local enforcement may reject traffic before it enters WireGuard or reaches Stronghold FW;
+- Stronghold FW remains the independent network-side Policy Enforcement Point;
+- endpoint decision records remain separate from FW Traffic Decision Journals and authoritative physical-interface PCAP;
+- Hunter may correlate endpoint decisions with Access Sessions/FW journals/PCAP only as derived interpretation;
+- initial endpoint scope is connection/application-aware enforcement, not a kernel-mode DPI/EDR product;
+- any later deep Layer-7 proxy or WFP callout-driver architecture requires separate justification and qualification;
+- endpoint local-administrator/root-equivalent tampering remains an explicit threat boundary;
+- endpoint control/telemetry/background work must be bounded and must not compromise FW capture-first priorities.
+
 ## Deferred IDS / TLS Inspection Rules
 
 `docs/IDS-INSPECTION.md` defines the governing future inspection architecture.
@@ -708,30 +794,32 @@ FW priority intent:
 8. HA bulk state sync
 9. authoritative Hunter HISTORY transfer
 10. compression where approved
-11. future transient IDS inspection transport / secure-access control housekeeping / deep analytics / observability / support work outside live path
+11. future transient IDS inspection transport / secure-access control / endpoint-control housekeeping / deep analytics / observability / support work outside live path
 ```
 
-Exact future ordering among secondary work must be qualified by measurement. Transient IDS work and secure-access control-plane/background work never outrank authoritative capture/history merely because those features are enabled.
+Exact future ordering among secondary work must be qualified by measurement. Transient IDS work, secure-access control-plane/background work, and endpoint-control background work never outrank authoritative capture/history merely because those features are enabled.
 
-Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, future IDS processing, secure-access housekeeping, and analytics must throttle rather than hide capture loss.
+Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, future IDS processing, secure-access housekeeping, endpoint-control housekeeping, and analytics must throttle rather than hide capture loss.
 
 ## Explicit Deferrals
 
-**Secure-access implementation is deferred. IDS/IPS implementation is deferred.**
+**Secure-access implementation is deferred. Endpoint-enforcement implementation is deferred. IDS/IPS implementation is deferred.**
 
 The future secure-access architecture is defined in `docs/SECURE-ACCESS.md`, but no production Access Agent, complete PE/PA/PEP implementation, WireGuard lifecycle, posture engine, L2TPv3/IPsec implementation, interoperability profile, or complete secure-access HA/failover contract is approved for implementation now.
 
+The future endpoint-enforcement architecture is defined in `docs/ENDPOINT-ENFORCEMENT.md`, but no production Windows Endpoint Agent, WFP integration, endpoint policy-distribution system, endpoint journal/integrity system, or deep Layer-7 component is approved for implementation now.
+
 The future inspection architecture is defined in `docs/IDS-INSPECTION.md`, but no IDS/IPS engine, detection ruleset, complete proxy implementation, QUIC implementation, complete fail-open/fail-closed contract, or IPS enforcement model is approved for implementation now.
 
-Nothing built now should weaken authoritative PCAP capture or make secure access or detection a current Phase 0 dependency.
+Nothing built now should weaken authoritative PCAP capture or make secure access, endpoint enforcement, or detection a current Phase 0 dependency.
 
 ## Scope Discipline
 
 Implementation begins with FW Phase 0 Traffic Observation Foundation using AF_XDP as the packet-acquisition foundation.
 
-Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, endpoint-enforcement implementation, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Phase 0 may establish reproducible AF_XDP capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/secure-access/IDS systems early.
+Phase 0 may establish reproducible AF_XDP capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/secure-access/endpoint/IDS systems early.
 
 Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
@@ -755,12 +843,14 @@ For management/health/support work, the same test includes whether the operator 
 
 For future secure access, the same test includes who/what requested access, which user/device/session/tunnel identity was established, what resource/site was authorized, which policy generation decided it, whether the secure path was actually established, whether access was granted/denied/revoked, whether revocation completed, and what traffic was actually permitted or failed.
 
+For future endpoint enforcement, the same test includes which endpoint/user/application/resource was involved, which policy generation was active, whether policy was current/holdover/expired, what the endpoint PEP decided, whether WFP enforcement actually activated, whether the connection was locally denied or allowed to proceed, and whether the FW ever observed corresponding traffic.
+
 For future IDS/inspection, the same test includes whether traffic was selected, successfully proxied, bypassed/unsupported, delivered to the IDS jail, dropped from the inspection feed, processed, and retained only according to the configured encrypted persistence policy.
 
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable AF_XDP/capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future IDS/inspection, and repository-write boundaries remain intact.
+Before proposing a change as complete, verify that applicable AF_XDP/capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future endpoint-enforcement, future IDS/inspection, and repository-write boundaries remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide AF_XDP/capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide AF_XDP/capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future secure-access, future endpoint-enforcement, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
