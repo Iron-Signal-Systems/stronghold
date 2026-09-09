@@ -4,7 +4,7 @@
 
 Phase 0 proves that Stronghold can continuously capture configured physical interfaces, durably preserve traffic, truthfully report loss/degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
-**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, complete management-plane implementation, complete observability/alerting integrations, support/remote-engineering systems, VPN, and IDS/IPS are not part of Phase 0.**
+**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, complete management-plane implementation, complete observability/alerting integrations, support/remote-engineering systems, secure-access/VPN implementation, and IDS/IPS are not part of Phase 0.**
 
 Phase 0 is grounded in the Stronghold truth model:
 
@@ -67,13 +67,13 @@ Define metadata that belongs inside PCAPNG versus Stronghold catalogs, including
 Freeze:
 
 ```text
-RAM buffer
+RAM / AF_XDP UMEM working buffers
     → NVMe / XFS HOT
     → SSD / XFS WARM/BACKLOG
     → verified transfer to Net-Hunter
 ```
 
-RAM is never durable history. OS and PCAP filesystems remain separate.
+RAM/UMEM is never durable history. OS and PCAP filesystems remain separate.
 
 Define `NORMAL`, `HIGH`, `URGENT`, `CRITICAL` pressure behavior, Hunter outage/backlog accounting, oldest-pending state, safe tier movement, and truthful exhaustion behavior.
 
@@ -84,7 +84,7 @@ Pressure may throttle secondary work and accelerate safe movement/transfer. It m
 Freeze Phase 0 workload priority:
 
 ```text
-1. packet receive
+1. packet receive / AF_XDP queue service
 2. active PCAP writes
 3. segment finalization / essential integrity
 4. essential observation/catalog/source-history state
@@ -94,17 +94,20 @@ Freeze Phase 0 workload priority:
 8. deep indexing/analytics outside FW live path
 ```
 
-Define capture-ring occupancy, packet drops, CPU, memory, NVMe write latency/queue pressure, storage pressure, and transfer-backlog measurements used to throttle secondary work.
+Define AF_XDP RX/fill/completion ring occupancy, UMEM pressure, packet drops, CPU, memory, NVMe write latency/queue pressure, storage pressure, and transfer-backlog measurements used to throttle secondary work.
 
-Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, IDS/proxy work, and other later systems must obey capture-first priority.
+Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, IDS/proxy work, secure-access work, and other later systems must obey capture-first priority.
 
-### 0.6 Single-Interface Capture Prototype
+### 0.6 Single-Interface AF_XDP Capture Prototype
+
+`docs/AF-XDP.md` defines the governing capture architecture.
 
 ```text
 Arch Linux x86_64
     → one qualified physical NIC
-    → AF_PACKET / TPACKET_V3
-    → RAM ring
+    → minimal XDP program
+    → AF_XDP socket bound to qualified RX queue
+    → UMEM + RX/FILL/COMPLETION rings
     → PCAPNG writer
     → NVMe / XFS HOT
     → rotation
@@ -115,13 +118,19 @@ Arch Linux x86_64
 
 Capture without protocol allowlisting.
 
-No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, TLS/application proxying, UI, or other later system is required here.
+AF_XDP is the intended Phase 0 acquisition foundation. AF_PACKET/TPACKET_V3 is not the planned primary capture implementation and must not be used as a silent fallback while preserving an AF_XDP qualification claim.
 
-### 0.7 Multi-Interface Capture
+Keep the XDP program minimal and measurable. Phase 0 does not turn XDP/eBPF into a second firewall or policy engine before the observation path is proven.
 
-Extend to multiple qualified physical interfaces. Begin with one capture worker/ring per physical interface unless profiling proves another model superior.
+No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, IDS/IPS, TLS/application proxying, UI, or other later system is required here.
 
-Do not freeze supported interface count as a product claim until qualification proves it.
+### 0.7 Multi-Interface / Multi-Queue AF_XDP Capture
+
+Extend to multiple qualified physical interfaces and RX queues.
+
+Begin with explicit queue ownership and a simple measurable socket/worker model. Queue-to-core affinity, RSS distribution, UMEM ownership/sharing, CPU locality, PCIe locality, and NUMA placement must be measured rather than hidden behind a generic worker pool.
+
+Do not freeze supported interface/queue count as a product claim until qualification proves it.
 
 ### 0.8 Performance, Loss, Visibility, and Qualification Baseline
 
@@ -129,16 +138,21 @@ Measure at minimum:
 
 - Mbps/Gbps;
 - packets/sec;
-- CPU;
-- memory/ring occupancy;
+- CPU/core utilization;
+- AF_XDP RX/FILL/COMPLETION ring occupancy/pressure;
+- UMEM pressure and starvation;
+- AF_XDP copy/native/zero-copy operating mode;
+- RSS/queue distribution;
+- CPU affinity and NUMA/PCIe locality where applicable;
+- memory;
 - NVMe throughput/latency;
-- NIC/kernel/ring/capture drops;
+- NIC/XDP/AF_XDP/user-space/writer drops where measurable;
 - segment finalization time;
 - hashing time;
 - catalog lag; and
 - sustained behavior over representative duration.
 
-Exercise representative packet sizes and mixed profiles. Optimization such as fanout, affinity, queue-aware scaling, or AF_XDP must be justified by measurement.
+Exercise representative packet sizes and mixed profiles, including small-packet/high-PPS cases. Queue topology, affinity, batch size, ring size, UMEM sizing, zero-copy use, and other tuning must be justified by measurement.
 
 Compare Stronghold visibility against Wireshark/dumpcap under equivalent supported interface conditions, including representative Layer-2/control-plane, VLAN, unknown, and malformed traffic when test infrastructure permits.
 
@@ -148,7 +162,11 @@ Preserve enough reproducible test context to become a later Stronghold release/h
 Stronghold release/build
 kernel
 NIC/driver/firmware
-PCIe/topology context
+XDP/AF_XDP mode
+queue/RSS configuration
+UMEM/ring sizes
+CPU affinity
+NUMA/PCIe topology context
 storage
 traffic generator/profile
 packet sizes
@@ -192,7 +210,7 @@ Phase 0 is not complete until representative supported hardware can continuously
 
 > **What did the hardware present to Stronghold, what did Stronghold durably capture, what—if anything—was dropped, where are the packets now, what history is pending transfer, what has Net-Hunter independently verified/committed, and can the relevant traffic be found/exported without compromising ongoing capture?**
 
-The exit gate includes Wireshark/dumpcap visibility comparison, L2/control-plane behavior, load/loss accounting, interruption recovery, storage pressure, tier movement, Hunter outage/backlog, destination-full behavior, and verified handoff.
+The exit gate includes Wireshark/dumpcap visibility comparison, AF_XDP queue/UMEM behavior, copy/native/zero-copy mode truthfulness, L2/control-plane behavior, load/loss accounting, small-packet/PPS stress, CPU/NUMA/PCIe locality, interruption recovery, storage pressure, tier movement, Hunter outage/backlog, destination-full behavior, and verified handoff.
 
 ## Later Architecture Already Defined at Concept Level
 
@@ -251,6 +269,9 @@ Secure Boot / measured boot / attestation separation
 logical identity vs hardware/root-of-trust identity
 future platform-trust state
 qualified appliance profiles
+AF_XDP as the intended FW acquisition foundation
+AF_XDP queue/UMEM/RSS/affinity/NUMA/PCIe qualification
+AF_XDP copy/native/zero-copy state separated from qualification
 NIC/driver/firmware and PCIe/NUMA qualification
 separate capture/full-feature/HA performance claims
 Net-Hunter sustainable ingest/query/degraded-storage qualification
@@ -300,6 +321,15 @@ explicit inspection coverage/bypass/failure truth
 normal IDS overload does not silently backpressure production forwarding
 mTLS/pinned applications bypass unless explicitly supported
 QUIC/HTTP3 handling remains explicit rather than hidden
+NIST SP 800-207 PE/PA/PEP direction for zero-trust remote access
+WireGuard as zero-trust remote-access secure transport/data plane
+Stronghold Access Session as authorization/session authority
+WireGuard peer/AllowedIPs separated from Stronghold resource authorization
+first-class grant/deny/revoke lifecycle
+Stronghold Access Agent direction
+L2TPv3 protected by IPsec for site-to-site / branch-office tunneling
+site/tunnel identity separated from tunnel reachability
+site-to-site tunnel state remains subject to normal Stronghold policy
 ```
 
 ## Later HA Qualification
@@ -422,6 +452,8 @@ HA promotion consequences
 hardware support/profile format
 CPU/RAM/ECC requirements
 NIC/driver/firmware matrix
+AF_XDP/XDP driver and operating-mode matrix
+AF_XDP queue/RSS/UMEM/affinity qualification
 PCIe / NUMA qualification
 NVMe sustained-write/endurance profile
 feature-specific performance profiles
@@ -589,11 +621,64 @@ Stronghold FW never intentionally persists decrypted inspection payload at rest,
 
 Authoritative encrypted-wire PCAP remains the packet-history authority. IDS findings are derived interpretation.
 
-## Explicitly Deferred — VPN
+## Later Secure Access Qualification
 
-**VPN is shelved/deferred.**
+The governing future architecture is `docs/SECURE-ACCESS.md`.
 
-No VPN architecture, protocol set, tunnel model, key-management contract, remote-access model, or performance claim is selected now. VPN must not influence Phase 0 implementation.
+**Implementation remains deferred.** Stronghold secure access is architecturally separated into zero-trust remote access and site-to-site / branch-office tunneling.
+
+Before zero-trust remote access is promoted into an implementation phase, freeze and validate:
+
+```text
+NIST SP 800-207 PE / PA / PEP responsibility boundaries
+Stronghold Access Session schema/lifecycle
+user/device identity model
+MFA model
+posture model and truth boundaries
+Stronghold Access Agent platform/enrollment/update model
+WireGuard key/session lifecycle
+WireGuard AllowedIPs vs Stronghold resource-policy boundary
+tunnel address allocation
+resource authorization model
+grant/deny/revoke and reauthorization behavior
+control-plane outage behavior
+PE/PA/PEP performance/scaling
+HA behavior
+capture/journal representation
+Hunter correlation
+management/API/RBAC
+health/alerting
+```
+
+Before site-to-site / branch-office VPN is promoted into an implementation phase, freeze and validate:
+
+```text
+L2TPv3 profile and implementation
+IPsec/IKE profile
+peer/site authentication model
+site/tunnel identity
+bridge/VLAN/zone integration
+routing interaction where applicable
+MTU/fragmentation behavior
+multi-WAN interaction
+HA/failover/rekey behavior
+packet-observation representation
+journal schema/events
+management/API/RBAC
+health/alerting
+interoperability/support matrix
+performance/PPS/throughput qualification
+```
+
+WireGuard peer authentication never substitutes for Stronghold user/device/resource authorization. L2TPv3/IPsec tunnel establishment never substitutes for Stronghold traffic authorization.
+
+## Explicitly Deferred — Secure Access Implementation
+
+**Zero-trust remote-access and site-to-site / branch-office secure-access implementation are shelved/deferred.**
+
+The future architecture is defined at concept level in `docs/SECURE-ACCESS.md`, but no production Access Agent, complete PE/PA/PEP implementation, WireGuard lifecycle implementation, posture engine, L2TPv3/IPsec implementation, interoperability profile, or complete HA/failover contract is selected for implementation now.
+
+The defined architecture does not pull secure access into Phase 0 and does not weaken the authoritative physical-interface capture model.
 
 ## Explicitly Deferred — IDS/IPS Implementation
 
@@ -620,7 +705,7 @@ exact Net-Hunter query language/API/partitioning strategy
 installation / factory provisioning / first-boot bootstrap architecture
 later dynamic-routing implementation contracts
 exact future Layer-7 boundaries outside defined inspection principles
-VPN — deferred
+secure-access implementation — deferred
 IDS/IPS implementation — deferred
 ```
 
