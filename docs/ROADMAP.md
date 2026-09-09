@@ -4,7 +4,7 @@
 
 Phase 0 proves that Stronghold can continuously capture configured physical interfaces, durably preserve traffic, truthfully report loss/degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
-**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, VPN, and IDS/IPS are not part of Phase 0.**
+**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, VPN, and IDS/IPS are not part of Phase 0.**
 
 Phase 0 is grounded in the Stronghold truth model:
 
@@ -55,6 +55,8 @@ Avoid per-packet database records unless measurement later justifies them.
 Unknown/undecoded packets remain authoritative capture content. The catalog must not make a parser-derived record the only proof that an authoritative segment exists.
 
 Do not force future Administrative, System/Health, Traffic Decision, Trust/Identity, Time/Clock, or Hunter Processing Journals into one mutable generic logging store.
+
+Phase 0 catalog work must remain compatible with the later `docs/NET-HUNTER-RECORDS.md` authority model without implementing the complete search/reprocessing system early.
 
 ### 0.3 PCAPNG Metadata Contract
 
@@ -113,7 +115,7 @@ Arch Linux x86_64
 
 Capture without protocol allowlisting.
 
-No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, VPN, IDS/IPS, UI, or other later system is required here.
+No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, VPN, IDS/IPS, UI, or other later system is required here.
 
 ### 0.7 Multi-Interface Capture
 
@@ -252,6 +254,17 @@ qualified appliance profiles
 NIC/driver/firmware and PCIe/NUMA qualification
 separate capture/full-feature/HA performance claims
 Net-Hunter sustainable ingest/query/degraded-storage qualification
+Net-Hunter segment catalog vs traffic/record catalog separation
+derived records/indexes rebuildable from authoritative history
+no row-per-packet primary search requirement
+historical MAC/IP/name/VLAN relationship preservation
+explicit direct-vs-correlated derived provenance
+explicit search/query coverage state
+index fallback toward segment catalogs/PCAP
+versioned targeted/full historical reprocessing
+processing/index backlog separation
+historical configuration-to-decision correlation
+traffic-derived result pivot back toward PCAP
 ```
 
 ## Later HA Qualification
@@ -384,6 +397,40 @@ release-to-hardware compatibility matrix
 
 Stronghold performance claims apply to qualified profiles, not arbitrary hardware.
 
+## Later Net-Hunter Records / Search / Reprocessing Qualification
+
+The governing architecture is `docs/NET-HUNTER-RECORDS.md`.
+
+Freeze and validate:
+
+```text
+segment-catalog authority and lifecycle
+traffic/record catalog boundaries
+flow/session identity and aggregation
+Layer-2/control-plane derived record families
+historical MAC/IP/name/VLAN relationship representation
+derived provenance classes and lineage
+source PCAP/journal locators
+query/search pivot model
+query coverage/completeness reporting
+unknown/unsupported/malformed traffic discoverability
+index rebuild / degraded-index behavior
+segment-catalog fallback when indexes are incomplete
+processing-generation / decoder-version lineage
+targeted reprocessing scopes
+full derived-generation rebuild/switch behavior
+Hunter Processing Journal integration
+transfer vs ingest vs processing vs reprocessing vs index backlog states
+historical configuration-generation correlation
+traffic-result → authoritative-PCAP pivot
+export provenance
+resource priority between current ingest, query, and historical reprocessing
+```
+
+Database/index technology, physical schemas, partitioning, exact Flow ID contracts, query language, and UI/API representation remain implementation choices to be selected after scale and workload measurements.
+
+An incomplete/rebuilding index must never produce an unqualified `no results` claim.
+
 ## Explicitly Deferred — VPN
 
 **VPN is shelved/deferred.**
@@ -410,7 +457,8 @@ exact external journal witness/anchor design, if adopted
 exact HA fencing/election implementation
 exact supported hardware profiles
 Net-Hunter off-system backup/replication/archive architecture
-Net-Hunter records/index/search/reprocessing implementation
+exact Net-Hunter database/index technology and physical schemas
+exact Net-Hunter query language/API/partitioning strategy
 later dynamic-routing implementation contracts
 exact future Layer-7 boundaries
 VPN — deferred
