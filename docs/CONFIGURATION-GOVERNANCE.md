@@ -16,6 +16,8 @@ The governing rules are:
 
 This model applies across CLI, API, future UI, automation/service identities, and controlled local-console recovery paths according to the authority available on each surface.
 
+`docs/POLICY-SIMULATION.md` governs non-mutating Dry Run/counterfactual testing before finalization and expected-versus-actual comparison after activation.
+
 ## Candidate Versus Durable Configuration
 
 A candidate is temporary working state.
@@ -31,6 +33,10 @@ VALIDATE
    ↓
 SHOW DIFF
    ↓
+DRY RUN / SIMULATE
+   ↓
+REVIEW EXPECTED IMPACT
+   ↓
 SAVE / COMMIT REQUEST
    ↓
 MANDATORY CHANGE COMMENT
@@ -44,9 +50,21 @@ NEW MONOTONIC STRONGHOLD GENERATION
 ACTIVATE
    ↓
 RUNTIME RECONCILIATION
+   ↓
+POST-COMMIT OBSERVATION
 ```
 
 Candidate editing, validation, diff, simulation, and discard may occur without creating durable configuration.
+
+Dry Run is explicitly non-mutating. It can evaluate expected policy, session, route, NAT, WAN, FQDN/address-family, and other supported candidate effects without creating a Git commit, Stronghold generation, or production runtime change.
+
+A simulation does not require a configuration-change comment merely to run because it is not a durable configuration change. Simulation remains separately authorized because its output may expose sensitive operational information.
+
+```text
+simulation authorized
+!=
+configuration finalization authorized
+```
 
 Once the operator invokes the finalizing action — whatever production vocabulary is later selected, such as `save`, `write`, `commit`, or equivalent — a change comment is mandatory.
 
@@ -193,6 +211,8 @@ runtime reconciliation result
 
 Exact schema remains implementation work.
 
+Non-mutating simulations are attributable management actions but do not create configuration generations. Their later record schema may preserve a Simulation ID, actor/service identity, candidate/base identity, simulation class, request context, and result status.
+
 ## DNP-Inspired Authority Model
 
 Stronghold adopts the security concepts established in the Iron Signal Systems Domain-Neutral Platform where they fit the Stronghold appliance threat model, including:
@@ -228,6 +248,7 @@ policy.modify
 policy.move
 policy.disable
 policy.remove
+policy.simulate
 policy.activate
 
 object.create
@@ -280,6 +301,10 @@ authorized to edit candidate
 !=
 authorized to finalize change
 
+authorized to simulate candidate
+!=
+authorized to activate candidate
+
 authorized to modify policy
 !=
 authorized to modify trust
@@ -325,6 +350,46 @@ A Security Administrator may have broader policy/NAT/ZTNA authority while still 
 A Senior Network Administrator may have wider scope while high-impact operations remain separately governed.
 
 The exact shipped roles are implementation/product-design work; the architecture requires granular authority rather than a single unrestricted firewall-admin capability.
+
+## Dry Run and Candidate Impact Review
+
+Before durable finalization, Stronghold should allow an authorized operator to evaluate the candidate against supported hypothetical and current-runtime facts.
+
+`docs/POLICY-SIMULATION.md` defines the detailed contract.
+
+Potential simulation classes include:
+
+```text
+single-flow policy test
+candidate against current sessions
+rule move/removal impact
+shared-object dependency/impact
+route impact
+NAT impact
+WAN/path impact
+IPv4/IPv6 family-aware FQDN evaluation
+future secure-access request evaluation
+```
+
+Simulation results are predictions and must be labeled accordingly.
+
+```text
+EXPECTED RESULT
+ESTIMATED IMPACT
+WOULD ALLOW
+WOULD DENY
+WOULD REBIND
+WOULD RESTART
+WOULD TERMINATE
+```
+
+A successful Dry Run is not a pre-authorization token. If the candidate/base generation or material dependent state changes, prior simulation results may become stale and must not be treated as current proof.
+
+```text
+simulation successful
+!=
+candidate authorized for activation
+```
 
 ## Step-Up and Independent Approval
 
@@ -409,6 +474,7 @@ privileged actions by actor
 denied administrative actions by actor
 authority exercised by actor
 approvals by actor
+simulations by actor
 changes by management surface
 changes within a time range
 changes affecting a stable Stronghold object
@@ -429,6 +495,8 @@ MANDATORY CHANGE COMMENT
     ↓
 GIT DIFF
     ↓
+PRE-COMMIT EXPECTED IMPACT
+    ↓
 STRONGHOLD GENERATION
     ↓
 POLICY/RUNTIME RECONCILIATION
@@ -436,6 +504,8 @@ POLICY/RUNTIME RECONCILIATION
 ALLOW / DENY DECISIONS
     ↓
 AUTHORITATIVE PACKET HISTORY
+    ↓
+EXPECTED vs ACTUAL COMPARISON
 ```
 
 Potential post-commit output may include:
@@ -449,11 +519,14 @@ newly denied flows
 top affected sources/destinations/services
 first observed impact time
 reconciliation status
+simulation-vs-actual divergence
 ```
 
-`docs/STATEFUL-ENFORCEMENT.md` governs live policy/session reconciliation behavior.
+`docs/STATEFUL-ENFORCEMENT.md` governs live policy/session reconciliation behavior. `docs/POLICY-SIMULATION.md` governs pre-commit prediction and expected-versus-actual comparison.
 
 Near-real-time packet capture makes this operationally valuable: an administrator can see an unintended deny immediately after a rule move/removal rather than learning about it hours later when a previously established client session finally closes.
+
+A material difference between predicted and observed impact is itself useful operational information. It does not automatically declare the configuration wrong or trigger rollback unless a future explicit policy says otherwise.
 
 ## Commit-Confirmed
 
@@ -480,8 +553,9 @@ None may bypass:
 
 ```text
 candidate semantics
-mandatory change comment
 validation
+Dry Run / simulation semantics
+mandatory change comment
 authorization/approval
 Git versioning
 Stronghold generation assignment
@@ -491,6 +565,8 @@ journaling
 ```
 
 An API endpoint or GUI button does not become a privileged alternative path.
+
+A management surface must not label a mutating production operation as Dry Run or silently increment production counters/session state during simulation.
 
 ## Service Identities
 
@@ -513,6 +589,11 @@ Where an emergency path must bypass an unavailable external identity provider, S
 ```text
 candidate edited                     != configuration changed
 validation passed                    != configuration saved
+simulation performed                 != configuration changed
+simulation authorized                != activation authorized
+simulation predicts ALLOW            != packet actually allowed
+simulation match                     != production policy hit
+candidate impact estimate            != post-commit observed impact
 comment supplied                     != operation authorized
 user authenticated                   != operation authorized
 role/group membership                != unrestricted authority
@@ -529,4 +610,4 @@ external DNP concepts reused         != Stronghold depends on DNP runtime
 
 ## Scope
 
-This document freezes architecture only. It does not pull Git implementation, complete RBAC/authorization services, DNP code reuse, approval workflows, CLI/API/UI implementation, historical-query indexing, or post-commit analytics into Phase 0.
+This document freezes architecture only. It does not pull Git implementation, complete RBAC/authorization services, DNP code reuse, approval workflows, policy simulation implementation, CLI/API/UI implementation, historical-query indexing, or post-commit analytics into Phase 0.
