@@ -9,6 +9,7 @@ This file defines how contributors, coding agents, and automation work within th
 - `docs/MANAGEMENT-PLANE.md`
 - `docs/OBSERVABILITY.md`
 - `docs/SUPPORT-DIAGNOSTICS.md`
+- `docs/IDS-INSPECTION.md`
 - `docs/ROADMAP.md`
 
 ## Governing Principles
@@ -37,6 +38,8 @@ This file defines how contributors, coding agents, and automation work within th
 
 > **Stronghold has no permanent vendor backdoor.**
 
+> **Decrypted inspection payload is never intentionally persisted at rest on Stronghold FW.**
+
 ## Product Model
 
 ### Stronghold FW
@@ -54,6 +57,7 @@ journal
 maintain local history backlog
 optionally participate in active/standby HA
 transfer verified history to Net-Hunter
+future selective TLS/application proxying only where explicitly configured
 ```
 
 ### Stronghold Net-Hunter
@@ -73,9 +77,10 @@ query
 export
 preserve FW configuration backups
 manage authorized retention / holds / archive lifecycle
+future isolated IDS/inspection analysis
 ```
 
-Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, or HA quorum/fencing.
+Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, or HA quorum/fencing. Future IDS/inspection processing also does not silently become a synchronous forwarding dependency.
 
 ## Three Categories of Truth
 
@@ -94,6 +99,8 @@ WHAT STRONGHOLD UNDERSTOOD
 
 Derived data remains traceable to authoritative source data. Reprocessing may create new/superseding derived interpretation but MUST NOT rewrite original PCAP or source journals.
 
+Future decrypted inspection material is non-authoritative derived processing input. The authoritative packet history remains the original wire PCAP.
+
 ## Capture Rules
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
@@ -106,7 +113,7 @@ RAM is buffering only, not durable capture.
 
 Initial acquisition direction is AF_PACKET/TPACKET_V3 unless later measured/approved contracts justify another path.
 
-Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, and other secondary activity.
+Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, and other secondary activity.
 
 ## Authorization and Forwarding Rules
 
@@ -128,7 +135,7 @@ authorize
           final egress
 ```
 
-Do not let route availability, NAT, FQDN association, WAN reachability, or HA membership grant security permission.
+Do not let route availability, NAT, FQDN association, WAN reachability, HA membership, or future IDS availability grant security permission.
 
 A route/FIB lookup may establish a needed fact but MUST NOT itself constitute authorization.
 
@@ -153,6 +160,8 @@ HA
 ```
 
 MANAGEMENT, HISTORY, and HA are not production transit. HISTORY is not HA sync. HA is not Hunter transfer. Neither is a normal interactive admin path.
+
+A future qualified high-throughput profile may add a dedicated `INSPECTION` interface, but no such physical-role requirement is frozen now.
 
 Routing is longest-prefix first, then equal-prefix source preference `STATIC`, `CONNECTED`, `DEFAULT`, `DYNAMIC`, then health, metric, deterministic tie-break.
 
@@ -232,6 +241,22 @@ vendor-supported hardware          != Stronghold-qualified hardware
 vendor-supported firmware          != Stronghold-qualified firmware
 BMC access                         != Stronghold configuration authority
 hardware change completed          != Stronghold platform validation passed
+HSTS enabled                       != enterprise TLS inspection impossible
+TLS proxied                        != TLS downgraded
+client inspection cert valid       != origin certificate valid
+inspection bypassed                != traffic unobserved
+inspection feed lost               != authoritative capture lost
+decrypted in FW memory             != decrypted retained on FW
+HISTORY transport identity         != INSPECTION transport identity
+encrypted inspection transport     != authorized inspection peer
+IDS jail access                    != ZFS key-management authority
+IDS finding retained               != full decrypted session retained
+original encrypted PCAP            != decrypted inspection history
+encrypted historical PCAP          != historical plaintext available
+IDS storage unavailable            != permission to spool plaintext
+IDS unavailable                    != production forwarding unavailable
+deep detection                     != inline enforcement
+inspection configured              != inspection coverage complete
 ```
 
 ## Failure-State Discipline
@@ -255,6 +280,9 @@ continuity_gap
 processing_pending
 index_incomplete
 configuration_drift
+inspection_bypassed
+inspection_unsupported
+inspection_feed_gap
 ```
 
 Do not infer success from absence of error. A later successful retry does not erase a failed operation.
@@ -284,7 +312,7 @@ High-volume journals may use durable batch commits while preserving per-entry se
 
 Periodic signed checkpoints/finalized journal segments authenticate heads; do not require expensive asymmetric signatures for every event.
 
-Journal-signing credentials are purpose-separated from TLS/history/HA credentials.
+Journal-signing credentials are purpose-separated from TLS/history/HA and future IDS/inspection transport credentials.
 
 Normal reboot continues an existing verified journal. Catastrophic continuity failure creates an explicit gap/new epoch rather than silently restarting the chain as though nothing happened.
 
@@ -305,6 +333,8 @@ Manual destruction requires explicit privileged authority and reason. Archive is
 Storage pressure cannot silently create emergency deletion authority or cause Hunter to ACK history it has not durably committed.
 
 Crypto-shredding, if ever supported, is a privileged destructive operation subject to hold evaluation and is not an ordinary cleanup shortcut.
+
+Future IDS findings and any retained decrypted context have retention independent from authoritative PCAP. Expiration of IDS material never grants authority to destroy authoritative PCAP.
 
 ## HA Rules
 
@@ -370,7 +400,7 @@ Missing authoritative history remains an explicit gap; never silently heal it.
 
 ## Encryption / Key Rules
 
-Stronghold uses purpose-separated encryption domains for packet history, journals/config history, secrets/private credentials, and derived/temp data.
+Stronghold uses purpose-separated encryption domains for packet history, journals/config history, secrets/private credentials, derived/temp data, and future IDS inspection persistence.
 
 FW direction favors encrypted block devices beneath Btrfs/XFS so application capture remains simple and capture-first.
 
@@ -389,6 +419,8 @@ Recovery authority is separate from normal administration and hunting.
 Routine key rotation should not inherently require rewriting all historical PCAP. Key wrapping and full data re-encryption are distinct.
 
 Key rotation does not prove previously protected data was never exposed.
+
+Future IDS persistence uses a dedicated encrypted-at-rest inspection domain. The Hunter host owns ZFS/key-management authority; the IDS jail does not.
 
 ## Platform Trust Rules
 
@@ -416,11 +448,11 @@ NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, VLA
 
 Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, and truthful loss accounting.
 
-Capture-only throughput is not a claim for full-feature stateful/NAT/HA operation.
+Capture-only throughput is not a claim for full-feature stateful/NAT/HA or future TLS-inspection operation.
 
 Node performance is not cluster performance. HA qualification measures failover stages and capture/session/journal outcomes separately.
 
-Hunter capacity is not sustainable ingest. Qualify ingest, verify/hash, indexes, query, retrieval, reprocessing, retention, scrub/resilver, and degraded-storage behavior separately.
+Hunter capacity is not sustainable ingest. Qualify ingest, verify/hash, indexes, query, retrieval, reprocessing, retention, scrub/resilver, degraded-storage behavior, and future IDS processing separately.
 
 ECC remains required direction for Hunter and a strong FW production preference until exact profiles are frozen.
 
@@ -430,16 +462,22 @@ Host owns FreeBSD, hardware, HBA/raw disks, ZFS, PF/networking, jail lifecycle, 
 
 Application jails do not receive host/root storage authority merely because they consume datasets.
 
-Defined jails:
+Defined current jails:
 
 1. PCAP Data Ingest Jail
 2. Record Processing Jail
 3. External User Interface Jail
 4. FW Configuration Backup Jail
 
+Future optional jail:
+
+5. IDS / Inspection Jail
+
 External UI authoritative access is read-only. Writable UI state is non-authoritative workspace only.
 
 Derived indexes may be rebuilt/reprocessed but MUST NOT rewrite authoritative PCAP/source journals.
+
+The future IDS/Inspection Jail is isolated from authoritative PCAP write authority, FW configuration authority, host/root authority, retention/hold authority, and ZFS key-management authority.
 
 ### Net-Hunter records/search authority
 
@@ -509,11 +547,13 @@ Preserve diagnose/test/repair behavioral distinctions.
 
 Health is domain-specific. Keep capture, PCAP durability, forwarding, policy, routing, WAN, HA, Hunter/history transfer, journals, time, trust, storage, hardware, and platform/update state independently observable.
 
+Future IDS/inspection health is separate from capture/forwarding health. Inspection coverage, feed gaps, proxy state, IDS jail state, and inspection storage state must not be hidden by otherwise healthy forwarding.
+
 Do not infer subsystem health from process uptime or interface-link state.
 
 High-frequency metrics and authoritative journals are separate stores/purposes. Metrics measure; journals preserve meaningful authoritative transitions/actions.
 
-Alert acknowledgement/suppression/resolution never rewrites journal history or erases a capture/durability gap.
+Alert acknowledgement/suppression/resolution never rewrites journal history or erases a capture/durability/inspection gap.
 
 External syslog, SNMP, API, and future webhook systems consume Stronghold state; they do not become authority for it.
 
@@ -541,6 +581,8 @@ Native engineering/root access is exceptional. After native modification, perfor
 
 Support/debug/compression/diagnostic activity throttles before live capture is sacrificed.
 
+Future decrypted inspection payload must never be silently written into debug logs, support bundles, core dumps, or plaintext temporary files. IDS/inspection crash material is high-sensitivity content.
+
 ### Vendor hardware management preference
 
 When access below the Stronghold appliance layer is required, use the qualified hardware vendor's preferred/supported out-of-band management platform and procedures where practical.
@@ -552,6 +594,34 @@ BMC/OOB administration and Stronghold administration are separate trust domains.
 Vendor-supported hardware/firmware does not automatically equal Stronghold-qualified hardware/firmware.
 
 Vendor OOB access must not become a hidden path over PRODUCTION, HISTORY, or HA.
+
+## Deferred IDS / TLS Inspection Rules
+
+`docs/IDS-INSPECTION.md` defines the governing future inspection architecture.
+
+**Implementation remains deferred.** Do not implement an IDS engine, TLS proxy, interception CA, IPS enforcement mechanism, or inspection fail-open/fail-closed behavior without later explicit approval and phase placement.
+
+The following architecture boundaries are already mandatory for any future implementation:
+
+- TLS/application inspection is explicitly selected by policy rather than required for ordinary forwarding.
+- inspected application sessions remain encrypted on both sides of the FW proxy;
+- decrypted inspection payload on FW is volatile-only and MUST NOT be intentionally persisted at rest;
+- plaintext is transported to Hunter only by re-encrypting it over a dedicated mutually authenticated inspection channel;
+- inspection transport uses purpose-specific IDS/inspection credentials and explicit peer authorization;
+- HISTORY and INSPECTION identities, queues, accounting, health, and failure semantics remain separate;
+- there is no plaintext fallback if inspection transport trust/encryption fails;
+- future IDS processing occurs in an isolated IDS/Inspection Jail;
+- any persisted IDS findings/context reside only in a dedicated encrypted-at-rest inspection domain;
+- ZFS/key-management authority remains with the Hunter host, not the IDS jail;
+- findings-only is the default retention direction; full decrypted session retention and TLS session-secret retention are not default behavior;
+- normal IDS overload/Hunter unavailability does not silently backpressure production forwarding;
+- any fail-closed/MUST_INSPECT behavior must be explicit and scoped;
+- inspection bypass/unsupported states remain visible and do not imply the original traffic was unobserved;
+- mTLS and pinned applications default toward bypass unless explicitly supported by a later approved proxy model;
+- QUIC/HTTP3 behavior is explicit and never silently represented as successful native inspection;
+- IDS findings remain derived interpretation with provenance toward authoritative encrypted-wire PCAP where available.
+
+Deep Hunter analysis is not a per-packet synchronous forwarding oracle.
 
 ## Resource Priority
 
@@ -566,28 +636,30 @@ FW priority intent:
 6. journal checkpoint/finalization
 7. local tier movement/backlog
 8. HA bulk state sync
-9. Hunter transfer
+9. authoritative Hunter HISTORY transfer
 10. compression where approved
-11. deeper analytics / observability / support work outside live path
+11. future transient IDS inspection transport / deep analytics / observability / support work outside live path
 ```
 
-Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, and analytics must throttle rather than hide capture loss.
+Exact future ordering among secondary work must be qualified by measurement, but transient IDS work never outranks authoritative capture/history merely because detection is enabled.
+
+Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, future IDS processing, and analytics must throttle rather than hide capture loss.
 
 ## Explicit Deferrals
 
-**VPN is deferred. IDS/IPS is deferred.**
+**VPN is deferred. IDS/IPS implementation is deferred.**
 
-Do not implement, select, or imply a current VPN architecture, IDS/IPS engine, inline IPS behavior, TLS interception, detection ruleset contract, or IDS/IPS fail-open/fail-closed behavior without later explicit approval.
+The future inspection architecture is defined in `docs/IDS-INSPECTION.md`, but no IDS/IPS engine, detection ruleset, complete proxy implementation, QUIC implementation, complete fail-open/fail-closed contract, or IPS enforcement model is approved for implementation now.
 
-Nothing built now should prevent future detection from reading authoritative PCAP and producing derived results, but detection is not a current capture dependency.
+Nothing built now should weaken authoritative PCAP capture or make detection a current Phase 0 dependency.
 
 ## Scope Discipline
 
 Implementation begins with FW Phase 0 Traffic Observation Foundation.
 
-Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Phase 0 may establish reproducible capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support systems early.
+Phase 0 may establish reproducible capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/IDS systems early.
 
 Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
@@ -607,10 +679,12 @@ For Hunter search, the same test includes whether a `no results` answer came fro
 
 For management/health/support work, the same test includes whether the operator can distinguish intended configuration from runtime state, determine which responsibility is degraded, and identify what diagnostic/support action changed or did not change appliance state.
 
+For future IDS/inspection, the same test includes whether traffic was selected, successfully proxied, bypassed/unsupported, delivered to the IDS jail, dropped from the inspection feed, processed, and retained only according to the configured encrypted persistence policy.
+
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, and repository-write boundaries remain intact.
+Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, and repository-write boundaries remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
