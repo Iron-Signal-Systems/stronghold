@@ -2,11 +2,9 @@
 
 ## Purpose
 
-This file defines how contributors, coding agents, and automation should work within the Stronghold repository.
+This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace `docs/ARCHITECTURE.md` or `docs/ROADMAP.md`.
 
-It is an engineering map and behavioral contract. It does not replace architecture and implementation contracts under `docs/`.
-
-Stronghold is built around these governing principles:
+## Governing Principles
 
 > **Capture first. Never sacrifice observation for secondary work.**
 
@@ -24,30 +22,24 @@ Stronghold is built around these governing principles:
 
 > **Record what the system can actually establish, preserve the source of that truth, and never manufacture certainty beyond it.**
 
-Stronghold engineering must preserve truthful packet observation, explicit packet-loss accounting, durable capture semantics, authorization-first forwarding behavior, clear failure behavior, operational simplicity, identity/trust boundaries, timestamp truthfulness, journal lineage, retention/hold/destruction authority, HA ownership/fencing truthfulness, appliance-lifecycle/update truthfulness, and the separation between Stronghold FW and Stronghold Net-Hunter.
-
 ## Product Model
 
 ### Stronghold FW
-
-Stronghold FW runs on Arch Linux and owns live-network responsibilities:
 
 ```text
 observe
 preserve
 authorize
-bridge and/or route
+bridge / route
 NAT where configured
 enforce
-journal decisions/state
+journal
 maintain local history backlog
 optionally participate in active/standby HA
 transfer verified history to Net-Hunter
 ```
 
 ### Stronghold Net-Hunter
-
-Stronghold Net-Hunter runs on FreeBSD with ZFS and jails and owns historical responsibilities:
 
 ```text
 receive
@@ -61,184 +53,134 @@ hunt
 query
 export
 preserve FW configuration backups
-manage authorized retention/hold/archive lifecycle
+manage authorized retention / holds / archive lifecycle
 ```
 
-Net-Hunter must never become a runtime dependency for Stronghold FW capture, bridging, routing, NAT, firewall enforcement, or HA quorum/fencing.
+Net-Hunter must never become a runtime dependency for FW capture, forwarding, NAT, enforcement, or HA quorum/fencing.
 
-## Product Engineering Principles
-
-### Three categories of truth
+## Three Categories of Truth
 
 Preserve the distinction between:
 
 ```text
 WHAT WAS PRESENTED
-    authoritative physical-interface observation / PCAPNG
+    authoritative physical-interface PCAPNG
 
 WHAT STRONGHOLD DID
-    authoritative operational and decision journals
+    authoritative operational / decision journals
 
 WHAT STRONGHOLD UNDERSTOOD
     derived interpretation / correlation / enrichment
 ```
 
-Derived information must remain traceable to authoritative sources.
+Derived data remains traceable to authoritative source data. Reprocessing may create new/superseding derived interpretation but MUST NOT rewrite original PCAP or source journals.
 
-A later decoder/correlator may supersede an older derived interpretation, but it must not rewrite the original packet observation or source journal merely because Stronghold understands the event better now.
-
-### Observation survives interpretation
-
-> **Observation survives interpretation.**
-
-If a frame is captured but cannot be decoded, preserve the frame and explicit decoder/interpretation state.
-
-Do not convert:
-
-```text
-not_decoded
-```
-
-into:
-
-```text
-not_observed
-```
-
-Do not convert missing derived history into proof that the underlying event did not occur.
-
-### Capture first
-
-Prefer work that improves, in order:
-
-1. Wireshark-class visibility on configured physical interfaces;
-2. packet capture correctness;
-3. truthful loss accounting;
-4. durable local capture;
-5. integrity;
-6. comprehensive source history/journals;
-7. authorization/enforcement correctness;
-8. explainability;
-9. failure behavior;
-10. operational simplicity; and
-11. downstream processing.
+## Capture Rules
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
 
-Wireshark/dumpcap on the same supported physical interface under the same conditions is the reference visibility baseline.
+Wireshark/dumpcap on the same supported physical interface under the same conditions is the visibility reference.
 
-Unknown EtherTypes, unknown IP protocols, malformed traffic, vendor-specific frames, and non-routable Layer-2/control-plane traffic are not discarded merely because Stronghold does not understand them.
+Unknown EtherTypes, unknown IP protocols, malformed/vendor-specific traffic, and Layer-2/control-plane traffic are not discarded merely because Stronghold does not understand them.
 
-Live packet capture and active durable PCAP writes take priority over transfer, compression, indexing, analytics, hunt activity, and other background work.
+RAM is buffering only, not durable capture.
 
-### Raw packet history is authoritative
+Initial acquisition direction is AF_PACKET/TPACKET_V3 unless later measured/approved contracts justify another path.
 
-Raw PCAPNG is authoritative for what network traffic Stronghold observed.
+## Authorization and Forwarding Rules
 
-Structured observation, authorization, flow, protocol, bridge, firewall, routing, NAT, WAN-selection, HA, system, configuration, trust, time, retention, update, and Hunter-processing history exists to explain, correlate, locate, and make authoritative packet history usable.
-
-Absence of a decoded/derived record is not proof traffic did not exist.
-
-### Observation and disposition are different facts
-
-Do not collapse physical observation, authorization, bridge forwarding, route selection, firewall action, NAT, WAN selection, HA ownership, egress interface, and egress VLAN into one ambiguous event.
-
-Router-on-a-stick traffic may enter and leave the same physical interface under different VLAN contexts.
-
-A DROP/REJECT does not suppress authoritative ingress capture.
-
-Virtual HA network identity is forwarding identity, not capture identity. Historical provenance names the physical Stronghold node/interface that actually observed traffic.
-
-### Authorization before normal forwarding work
-
-Stronghold semantics are:
+Stronghold is explicit-allow/default-deny.
 
 ```text
-observe / capture / preserve
+observe / preserve
     ↓
 establish required policy facts
     ↓
-early authorization
-    ├── explicit deny → drop
-    ├── no explicit allow → default drop
+authorize
+    ├── deny / no allow → drop
     └── authorized to proceed
              ↓
-       bridge / routing
+       bridge / route
              ↓
  WAN / NAT / state / deeper work
              ↓
           final egress
 ```
 
-Do not let a route, NAT rule, FQDN association, WAN path, or HA cluster membership grant security permission.
+Do not let route availability, NAT, FQDN association, WAN reachability, or HA membership grant security permission.
 
-Where kernel/networking reality requires a route/FIB lookup to establish a classification fact, the lookup is allowed, but route lookup success itself MUST NOT constitute authorization.
+A route/FIB lookup may establish a needed fact but MUST NOT itself constitute authorization.
 
-For Layer-7 policy, `authorized_to_continue_processing` is not equivalent to `final_allow`.
+Policy rules use dense integer positions, lowest-to-highest, first match wins. Policy ID is stable identity only, never priority.
 
-### Common truth separations
+Preserve `NOT_PERFORMED` when later pipeline work did not occur.
 
-Preserve at least these distinctions:
+## Networking Rules
+
+Supported architecture includes Layer-2 transparent bridging, Layer-3 IPv4/IPv6 routing, router-on-a-stick over 802.1Q, and hybrid deployments.
+
+VLAN is first-class and preserves Stronghold identity plus actual VLAN ID.
+
+Current interface roles:
 
 ```text
-route available
-!=
-route authorized
-
-certificate valid
-!=
-peer authorized
-
-packet not decoded
-!=
-packet not observed
-
-no journal record
-!=
-event did not occur
-
-timestamp precision
-!=
-timestamp accuracy
-
-policy allowed
-!=
-forwarding succeeded
-
-object expired
-!=
-destruction authorized
-
-bytes received
-!=
-history durably committed
-
-archived
-!=
-destroyed
-
-new interpretation
-!=
-new historical observation
-
-forwarding HA succeeded
-!=
-capture continuity guaranteed
-
-virtual cluster identity
-!=
-physical capture identity
-
-software installed
-!=
-Stronghold update validated
+PRODUCTION
+WAN
+MANAGEMENT
+HISTORY
+HA
 ```
 
-Do not collapse any of these merely because an implementation shortcut makes it convenient.
+MANAGEMENT, HISTORY, and HA are not production transit. HISTORY is not HA sync. HA is not Hunter transfer. Neither is a normal interactive admin path.
 
-### Report only what Stronghold can establish
+Routing is longest-prefix first, then equal-prefix source preference `STATIC`, `CONNECTED`, `DEFAULT`, `DYNAMIC`, then health, metric, deterministic tie-break.
 
-Preserve meaningful distinctions such as:
+NAT is separate from authorization. WAN eligibility is explicit per destination/service.
+
+## Common Truth Separations
+
+Never collapse these distinctions:
+
+```text
+route available                 != route authorized
+certificate valid               != peer authorized
+packet not decoded              != packet not observed
+no journal record               != event did not occur
+timestamp precision             != timestamp accuracy
+policy allowed                  != forwarding succeeded
+object expired                  != destruction authorized
+bytes received                  != history durably committed
+archived                        != destroyed
+new interpretation              != new historical observation
+forwarding HA succeeded         != capture continuity guaranteed
+virtual cluster identity        != physical capture identity
+software installed              != Stronghold update validated
+configuration restored          != appliance validated
+backup written                  != backup proven restorable
+ZFS redundancy                  != disaster recovery
+disk encrypted                  != secrets safely designed
+TPM protected                   != disaster recoverable
+cluster member                  != shared local disk key
+key rotated                     != past exposure undone
+entry written                   != journal entry durably committed
+hash chain valid                != checkpoint externally anchored
+signed checkpoint               != physically immutable storage
+new journal epoch               != uninterrupted history
+system booted                   != approved system state
+Secure Boot enabled             != measured boot verified
+measured boot available         != attestation performed
+Appliance ID                    != TPM identity
+hardware detected               != hardware qualified
+hardware compatible             != hardware supported
+link speed                      != validated dataplane rate
+capture throughput              != full-feature firewall throughput
+node performance                != HA cluster performance
+storage capacity                != sustainable ingest capacity
+```
+
+## Failure-State Discipline
+
+Preserve meaningful states such as:
 
 ```text
 unknown
@@ -252,15 +194,15 @@ degraded
 unavailable
 mismatch
 failed
+recovery_required
+continuity_gap
 ```
 
-Do not infer success from absence of error. Do not report durability merely because data reached RAM or a write call returned.
+Do not infer success from absence of error. A later successful retry does not erase a failed operation.
 
-Packet drops, capture gaps, journal/index lag, Hunter backlog, storage pressure, route failures, WAN degradation, HA sync/fencing failures, clock uncertainty, authentication failures, configuration failures, retention/destruction failures, update/rollback failures, and verification failures must remain observable.
+## Journal Rules
 
-### Journal, do not casually log
-
-Maintain logically separate append-oriented journals for:
+Maintain independent append-oriented journals:
 
 ```text
 Administrative
@@ -271,691 +213,227 @@ Time / Clock
 Hunter Processing
 ```
 
-Committed entries are not silently overwritten. Corrections, recovery, retries, later success, retention/destruction, update/rollback results, and superseding interpretation create new entries.
+Each journal has separate Journal ID/domain, origin Appliance ID, epoch, monotonic local sequence, and hash-linked committed entries.
 
-Preserve local advancing sequence/order independently of wall-clock correctness.
+Wall-clock time is not local journal order.
 
-Critical journal integrity/tamper detection must remain feasible. Do not conflate journal-chain integrity with PCAP segment integrity.
+Hash/signature calculation requires a canonical exact-byte representation. Do not hash ambiguous serializer output.
 
-### Retention is explicit policy
+`write()` success is not journal commit. Authoritative head advances only after the required durability boundary.
 
-PCAP and each journal domain have independent retention policy.
+High-volume journals may use durable batch commits while preserving per-entry sequence/hash linkage.
 
-Age/threshold establishes expiration eligibility, not destruction authority. Holds override normal expiration. Destructive retention must not rely on speculative parser-derived classification without an explicit approved contract.
+Periodic signed checkpoints/finalized journal segments authenticate heads; do not require expensive asymmetric signatures for every event.
 
-### HA safety before aggressive failover
+Journal-signing credentials are purpose-separated from TLS/history/HA credentials.
+
+Normal reboot continues an existing verified journal. Catastrophic continuity failure creates an explicit gap/new epoch rather than silently restarting the chain as though nothing happened.
+
+Hunter verifies FW journal linkage/checkpoints independently and preserves source FW journals without rewriting them. Hunter Processing Journal is a separate authority.
+
+Authorized journal retention may remove content only while preserving enough checkpoint/tombstone lineage to establish that the range existed and was deliberately destroyed.
+
+Use the term **append-oriented and cryptographically tamper-evident** unless a later WORM/witness design actually justifies stronger immutability claims.
+
+## Retention / Hold / Destruction Rules
+
+PCAP and each journal domain have independent retention.
+
+Age/threshold establishes eligibility, not destruction authority. Holds override normal expiration.
+
+Manual destruction requires explicit privileged authority and reason. Archive is not destruction.
+
+Storage pressure cannot silently create emergency deletion authority or cause Hunter to ACK history it has not durably committed.
+
+Crypto-shredding, if ever supported, is a privileged destructive operation subject to hold evaluation and is not an ordinary cleanup shortcut.
+
+## HA Rules
+
+Initial HA is optional active/standby only.
+
+Each node keeps its own Appliance ID, physical capture provenance, management/history/HA identities, storage, certificates, and local keys. The pair has a Cluster ID and cluster-owned virtual forwarding identity.
+
+Virtual forwarding identity never replaces physical capture provenance.
+
+Heartbeat/control and bulk state sync are separate traffic classes. Heartbeat/control must not be starved; bulk sync may lag. Capture remains highest live-data priority.
 
 > **Loss of peer communication is not, by itself, proof that the peer is dead.**
 
 > **A standby must not claim ACTIVE cluster identity until the fencing/election contract permits promotion.**
 
-Split-brain prevention takes precedence over aggressive failover when ownership cannot be established safely.
+Promotion evaluates health, path readiness, peer evidence, fencing/election, config state, software/HA compatibility, state-sync state, and later platform-trust state.
 
-Forwarding availability, session continuity, capture continuity, and historical durability are separate outcomes and must not be collapsed into one generic HA-success state.
+Net-Hunter is not HA quorum/witness.
 
-### Stronghold controls appliance updates
+Successful forwarding failover does not justify a zero-capture-gap claim.
 
-Stronghold FW is an appliance built on Arch Linux, not a supported general-purpose rolling Arch host.
+## Appliance Update Rules
 
-Do not design production operation around unrestricted administrator package upgrades such as generic `pacman -Syu`.
+Stronghold FW is an appliance built on Arch Linux. Do not design supported production operation around unrestricted customer `pacman -Syu`.
 
-Stronghold-qualified releases must preserve the ability to bind/validate the relevant Stronghold software, kernel, NIC driver/firmware, nftables/netfilter, capture stack, configuration schema, journal schemas, and HA protocol/state formats.
+A qualified release binds/validates relevant Stronghold software, kernel, NIC driver/firmware, nftables/netfilter, capture stack, schemas, and HA formats.
 
-A successful package install or successful boot is not sufficient to mark an update successful.
+Update material must be cryptographically verified. Preserve signed offline update support.
 
-### Simple does not mean vague
+Install or boot success is not update validation. Kernel/NIC/netfilter/capture/storage changes require appropriate capture/enforcement regression validation.
 
-Do not hide Linux, FreeBSD, NIC, capture, bridge, routing, firewall, nftables/netfilter, filesystem, ZFS, jail, identity, PKI, clock, journal, retention, HA, update, storage, or failure behavior behind vague abstractions.
+Configuration/schema migrations preserve recoverable source state until target validation succeeds.
 
-### Prefer explicit engineering
+Btrfs snapshots may assist rollback but do not define rollback correctness.
 
-Prefer narrow, inspectable implementation over speculative frameworks. Do not create generic plugin systems, arbitrary execution frameworks, catch-all registries, or unnecessary service boundaries without a real requirement.
+HA rolling update sequence is standby-first. If standby update/validation fails, STOP. Do not automatically risk the remaining healthy active node.
 
-## Sources of Truth
+Standalone FW updates that interrupt service create real forwarding/capture outages and must be reported truthfully.
 
-`docs/ROADMAP.md` defines current phase scope and gates.
+FreeBSD/ZFS software update does not automatically authorize irreversible ZFS pool-feature enablement.
 
-`docs/ARCHITECTURE.md` defines the broader Stronghold FW, Net-Hunter, capture, networking, policy, routing, HA, storage, history-transfer, identity, trust, authentication, time, journal, retention, appliance lifecycle/update, jail, configuration, and read/write-boundary architecture.
+## Recovery / DR Rules
 
-Do not implement future systems merely because they are architecturally documented.
+Distinguish rebuildable platform, configuration, identity/trust, authoritative history, derived state, and transient runtime state.
+
+Configuration backup is not identity/private-key backup.
+
+Recovering an Appliance ID onto replacement hardware is explicit privileged recovery, not ordinary import.
+
+Replacement hardware normally generates new private credentials and re-establishes authorization while preserving logical Appliance ID only when approved.
+
+Do not blindly restore physical NIC mappings; validate PCI/MAC/driver/capture capability before activation.
+
+Do not restore stale conntrack/NAT/session state from backup. HA replacement nodes synchronize current runtime state from the active peer where applicable.
+
+Recovered failed-node PCAP retains original source Appliance ID/observation time/segment lineage and is marked as later recovered history.
+
+ZFS RAID/snapshots are not DR.
+
+After major Hunter recovery, validate authoritative storage, journals/lineage, trust, holds, and retention before enabling destructive retention. Destructive operations come back last.
+
+Missing authoritative history remains an explicit gap; never silently heal it.
+
+## Encryption / Key Rules
+
+Stronghold uses purpose-separated encryption domains for packet history, journals/config history, secrets/private credentials, and derived/temp data.
+
+FW direction favors encrypted block devices beneath Btrfs/XFS so application capture remains simple and capture-first.
+
+Hunter direction favors ZFS-native encrypted datasets aligned with host/jail authority.
+
+TPM/HSM may protect normal key use but must not be the sole recovery path for authoritative history.
+
+HA nodes do not share local disk keys merely because they share cluster state.
+
+Private appliance identity keys should be non-exportable where supported. Replacement hardware normally generates new private credentials.
+
+General configuration should reference secret IDs rather than repeat plaintext secrets.
+
+Recovery authority is separate from normal administration and hunting.
+
+Routine key rotation should not inherently require rewriting all historical PCAP. Key wrapping and full data re-encryption are distinct.
+
+Key rotation does not prove previously protected data was never exposed.
+
+## Platform Trust Rules
+
+Distinguish logical Appliance ID, hardware/root-of-trust identity, certificate identity, and platform-trust state.
+
+Secure Boot, measured boot, and attestation are separate capabilities and must not be conflated.
+
+TPM-backed measured/sealed behavior is an anticipated FW direction but cannot be the only DR path.
+
+A valid signed update bundle does not prove the resulting booted appliance is in an approved state.
+
+An HA standby with unacceptable platform-trust state is not silently a normal promotion target.
+
+Development, qualification, and supported production hardware are separate categories.
+
+## Hardware Qualification Rules
+
+Stronghold claims apply to qualified appliance profiles, not arbitrary hardware that boots.
+
+Preserve distinctions between `DETECTED`, `COMPATIBLE`, `QUALIFIED`, and `SUPPORTED`.
+
+Qualification binds release, CPU, NIC/driver/firmware, PCIe/NUMA topology, RAM/ECC, storage, platform trust, and enabled feature set.
+
+NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, VLAN/offload representation, filtering/promiscuous behavior, ring/drop behavior, MTU, timestamps, reset behavior, and firmware.
+
+Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, and truthful loss accounting.
+
+Capture-only throughput is not a claim for full-feature stateful/NAT/HA operation.
+
+Node performance is not cluster performance. HA qualification measures failover stages and capture/session/journal outcomes separately.
+
+Hunter capacity is not sustainable ingest. Qualify ingest, verify/hash, indexes, query, retrieval, reprocessing, retention, scrub/resilver, and degraded-storage behavior separately.
+
+ECC remains required direction for Hunter and a strong FW production preference until exact profiles are frozen.
+
+## Net-Hunter Rules
+
+Host owns FreeBSD, hardware, HBA/raw disks, ZFS, PF/networking, jail lifecycle, updates, and hardware/storage health.
+
+Application jails do not receive host/root storage authority merely because they consume datasets.
+
+Defined jails:
+
+1. PCAP Data Ingest Jail
+2. Record Processing Jail
+3. External User Interface Jail
+4. FW Configuration Backup Jail
+
+External UI authoritative access is read-only. Writable UI state is non-authoritative workspace only.
+
+Derived indexes may be rebuilt/reprocessed but MUST NOT rewrite authoritative PCAP/source journals.
+
+## Resource Priority
+
+FW priority intent:
+
+```text
+1. packet acquisition
+2. active PCAP writes
+3. segment finalization / minimum integrity
+4. essential observation/decision/journal append
+5. HA heartbeat/control reserved lightweight capacity
+6. journal checkpoint/finalization
+7. local tier movement/backlog
+8. HA bulk state sync
+9. Hunter transfer
+10. compression where approved
+11. deeper analytics outside live path
+```
+
+Checkpoint signing, update work, bulk HA state, and analytics must throttle rather than hide capture loss.
+
+## Explicit Deferrals
+
+**VPN is deferred. IDS/IPS is deferred.**
+
+Do not implement, select, or imply a current VPN architecture, IDS/IPS engine, inline IPS behavior, TLS interception, detection ruleset contract, or IDS/IPS fail-open/fail-closed behavior without later explicit approval.
+
+Nothing built now should prevent future detection from reading authoritative PCAP and producing derived results, but detection is not a current capture dependency.
 
 ## Scope Discipline
 
-Stronghold begins implementation with the FW capture foundation.
+Implementation begins with FW Phase 0 Traffic Observation Foundation.
 
-Do not pull Layer-2 bridging, routing, nftables enforcement, FQDN policy, NAT, adaptive WAN selection, remote authentication, PKI enrollment, journal implementation, full retention/hold administration, HA, complete appliance-update system, VPN, IDS/IPS, external UI implementation, Net-Hunter processing, dynamic routing, VRF, or other future systems into the current phase unless explicitly approved.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Future Phase 0 work may collect baseline hardware/capture behavior needed for later update regression qualification, but it must not become an excuse to implement the update lifecycle early.
-
-## Contract Discipline
-
-Code MUST NOT silently violate architecture/implementation contracts, and a contract MUST NOT be weakened merely to make code pass.
-
-When implementation conflicts with a contract:
-
-1. stop at the boundary;
-2. identify the exact conflict;
-3. determine whether implementation, contract, or requirement is wrong;
-4. surface it explicitly; and
-5. resolve intentionally before continuing.
-
-Do not silently weaken capture completeness, loss accounting, durability, journal separation/ordering, authorization-before-routing, policy ordering, default deny, interface/VLAN identity, forwarding traceability, route rules, WAN eligibility, HA ownership/fencing, identity/trust separation, LDAPS-only AD behavior, timestamp truthfulness, retention/hold/destruction controls, update qualification/rollback safety, integrity verification, storage migration safety, Hunter transfer verification, UI read-only boundaries, configuration-backup isolation, or lineage/provenance.
-
-## Stronghold FW Rules
-
-### Capture
-
-The authoritative capture point is the configured supported physical interface. Capture does not require protocol recognition, routability, bridge relevance, or firewall relevance.
-
-RAM is buffering only and not durable capture storage.
-
-Initial acquisition direction is AF_PACKET/TPACKET_V3 unless measurement or later approved contract requires another source.
-
-### FW networking model
-
-Architecturally supported models:
-
-```text
-Layer-2 transparent bridging
-Layer-3 IPv4/IPv6 routing
-router-on-a-stick over 802.1Q trunks
-hybrid Layer-2/Layer-3 deployments
-```
-
-Do not introduce a global forwarding mode that forces unrelated interfaces/VLANs into one behavior.
-
-### FW objects and interface roles
-
-VLAN is first-class and preserves both Stronghold identity and actual 802.1Q ID.
-
-Expected objects include physical/logical interfaces, VLANs, bridge domains, zones, hosts, networks/groups, services/groups, FQDNs/groups, routes, security policy, NAT policy, WAN preference, HA cluster, HA nodes, and virtual forwarding identities.
-
-Current interface roles:
-
-```text
-PRODUCTION
-WAN
-MANAGEMENT
-HISTORY
-HA
-```
-
-`MANAGEMENT`, `HISTORY`, and `HA` are not production transit paths.
-
-`HISTORY` is not HA state sync. `HA` is not Hunter transfer. Neither is a normal interactive admin path.
-
-Reject configurations that route production through HISTORY/HA, place MANAGEMENT/HA into production bridge domains, or otherwise violate role boundaries.
-
-### FQDN truthfulness
-
-DNS association is not proof a connection actually used a hostname. Preserve the source of Layer-7 hostname knowledge when later supported.
-
-### Policy ordering
-
-Stronghold is explicit-allow/default-deny.
-
-Policy rules are dense integer positions, lowest to highest, first match wins. Policy ID is stable identity only and MUST NOT determine order.
-
-### Routing
-
-Only authorized traffic enters normal routing.
-
-```text
-1. longest prefix match
-2. equal-prefix source preference:
-       STATIC
-       CONNECTED
-       DEFAULT
-       DYNAMIC
-3. health / availability
-4. metric
-5. deterministic tie-break
-```
-
-A more-specific prefix wins. VRF is future-compatible, not initial.
-
-### WAN preference
-
-WAN eligibility is explicit per destination/service. Scheduled/adaptive selection may choose only among allowed WANs. Existing sessions normally remain on established WAN/NAT identity.
-
-### NAT
-
-NAT is separate from authorization. Preserve original and translated tuples and selected route/WAN/state.
-
-### FW storage
-
-```text
-separate SSD / Btrfs direction for OS
-NVMe / XFS HOT PCAP
-local SSD / XFS WARM/backlog PCAP
-Net-Hunter long-term history
-```
-
-PCAP exhaustion must not silently exhaust root filesystem.
-
-### Net-Hunter independence
-
-Hunter unavailability does not stop FW capture, bridge/routing, NAT, firewall enforcement, local journals, or HA election/forwarding. Hunter is not an HA witness/quorum dependency.
-
-## Stronghold FW HA Rules
-
-### Initial model
-
-Initial HA architecture is optional **active/standby**. Do not silently convert it into active/active forwarding.
-
-Each node keeps its own Appliance ID, physical NIC/MACs, management/history/HA identities, storage, clocks, source journals, certificates, and capture provenance.
-
-The pair has a stable Cluster ID.
-
-### Cluster forwarding identity
-
-Cluster-owned virtual gateway/WAN IPs and virtual MACs may move between nodes. Only the ACTIVE node may claim them.
-
-A STANDBY may hold configuration for virtual identity but MUST NOT answer/forward as owner until the fencing/election contract permits activation.
-
-Virtual identity movement never changes historical physical capture provenance.
-
-### Routed/VLAN and transparent HA
-
-Routed/VLAN HA uses cluster-owned gateway identities. Static/transferable WAN identity may likewise be cluster-owned.
-
-Transparent L2 HA uses explicit bridge ownership. Only one cluster bridge path may forward; the standby path must not create an L2 loop.
-
-Dynamic-WAN HA such as DHCP/PPPoE requires a later protocol-specific contract.
-
-### Cluster and node-local configuration
-
-Keep cluster configuration distinct from node-local configuration.
-
-Cluster configuration includes policy, VLANs/zones/bridge domains, routes, NAT, WAN preference, and virtual forwarding identity.
-
-Node-local configuration includes Appliance ID, management/history/HA addressing, physical NIC/PCI mapping, local storage mapping, and node certificate identity.
-
-### Cluster commit behavior
-
-Normal cluster commits must validate cluster semantics and each node's hardware/local context, stage the generation appropriately, and expose synchronization state.
-
-A stale standby is a degraded failover target.
-
-If degraded commits are later permitted while a peer is unavailable, they require explicit privileged action and must journal/configure the mismatch truthfully.
-
-Failover does not create a new configuration generation merely because ACTIVE ownership changed.
-
-### State synchronization
-
-Synchronize only state justified for stateful failover, such as:
-
-```text
-firewall session state
-NAT mappings
-session timers
-selected WAN
-route/session binding
-virtual runtime identity
-```
-
-Maintain explicit sync sequence/health such as:
-
-```text
-IN_SYNC
-MINOR_LAG
-DEGRADED
-OUT_OF_SYNC
-UNKNOWN
-```
-
-Do not promise universal seamless session migration. Record continuity limitations truthfully.
-
-### Heartbeat/control versus bulk state
-
-Heartbeat/control and bulk state synchronization are logically separate traffic classes.
-
-Heartbeat/control must remain lightweight and must not be starved by bulk sync.
-
-Capture remains the highest live-data priority. Bulk HA sync may lag under pressure.
-
-Do not treat one missed heartbeat as automatic failover authorization.
-
-### Promotion and fencing
-
-Standby promotion must evaluate local health, required path readiness, peer availability evidence, fencing/election safety, configuration state, software/HA-protocol compatibility, and state-sync condition.
-
-No single heartbeat timeout may bypass the fencing/election contract.
-
-When peer ownership cannot be established safely, prefer a single-owner outage over two nodes simultaneously claiming the cluster forwarding identity.
-
-A secondary management observation path may help distinguish an HA-link failure from peer failure, but lack of management reachability alone does not prove the peer is dead.
-
-### HA trust
-
-HA messages require authenticated explicit cluster membership. A device plugged into the HA network must not be able to claim ACTIVE, influence election, or inject trusted state merely because it can send packets.
-
-Exact HA protocol/certificate/fencing implementation remains future work.
-
-### Manual failover and maintenance
-
-Support architecture for controlled manual failover and explicit `MAINTENANCE` state. Planned transitions must remain distinguishable from failure-driven transitions.
-
-Expected runtime states may include:
-
-```text
-ACTIVE
-STANDBY
-PROMOTING
-DEMOTING
-MAINTENANCE
-VALIDATING
-DEGRADED
-FAILED
-```
-
-### HA is not PCAP replication
-
-Do not create a hidden requirement that every packet must be mirrored to the standby before capture is considered successful.
-
-The ACTIVE node captures locally and transfers to Hunter normally. The standby synchronizes operational state, not a mandatory realtime duplicate PCAP stream.
-
-If a failed node contains untransferred PCAP, that history remains attributable to that node and must be reconciled/recovered according to the later segment recovery contract.
-
-Successful forwarding failover does not justify a claim of zero packet-history gap.
-
-### HA journaling
-
-HA runtime events belong in the System/Health Journal; human-triggered operations also belong in the Administrative Journal.
-
-Preserve facts such as Cluster ID, node Appliance ID, role transition, configuration generation, state-sync sequence/health, software/HA-protocol compatibility, reason, fencing result, virtual identity assumption, and failover result.
-
-## Appliance Lifecycle and Update Rules
-
-### Stronghold-qualified releases
-
-Stronghold FW is operated as an appliance. Production support must not depend on arbitrary customer-selected OS/package versions.
-
-A Stronghold release should identify/qualify the relevant combination of:
-
-```text
-Stronghold software
-Linux kernel
-NIC drivers / managed firmware
-nftables / netfilter
-capture stack
-required system libraries
-configuration schema
-journal/schema versions
-HA protocol/state format
-```
-
-Do not assume `latest` package versions are automatically a supported Stronghold release.
-
-### Release integrity
-
-Update material must be cryptographically verified before activation.
-
-Preserve support for signed offline update bundles so restricted deployments do not require public Internet access.
-
-Do not silently downgrade signature/integrity requirements when online services are unavailable.
-
-### Update preflight
-
-Preflight must establish relevant compatibility/health before activation, including as applicable:
-
-```text
-source/target software release
-configuration generation/schema
-journal/state schema compatibility
-HA protocol/state-format compatibility
-peer HA health/synchronization
-local OS/filesystem/storage health
-update/rollback space
-NIC/interface mapping
-release integrity/signature state
-```
-
-Do not call a degraded HA pair a normal safe rolling-update starting point.
-
-### Update validation
-
-`install succeeded` and `boot succeeded` are not equivalent to `Stronghold update validated`.
-
-Updates affecting kernel/NIC/firmware/nftables/netfilter/AF_PACKET/AF_XDP/offloads/capture/storage path require regression validation appropriate to the change.
-
-Validation must establish the actual appliance role readiness, including relevant capture, interface, firewall, route, journal, storage, and HA facts.
-
-### Configuration/schema migration
-
-Configuration migrations are controlled transitions. Preserve the source configuration/schema until the target state is validated and rollback requirements are satisfied.
-
-Software version, configuration schema, journal/index schema, and HA state format are separate compatibility dimensions.
-
-Do not silently discard unknown/newer fields during a mixed-version HA window.
-
-### Rollback
-
-Btrfs snapshot support may assist rollback but does not define rollback correctness.
-
-Rollback must consider boot/kernel state, software version, configuration schema, journal/runtime formats, HA compatibility, and firmware implications where applicable.
-
-Do not start an old binary against incompatible newer state and describe that as successful rollback.
-
-### HA rolling updates
-
-Preferred sequence:
-
-```text
-FW-A ACTIVE
-FW-B STANDBY
-      ↓
-update FW-B
-      ↓
-validate FW-B
-      ↓
-controlled failover
-      ↓
-FW-B ACTIVE
-FW-A STANDBY
-      ↓
-validate production state
-      ↓
-update FW-A
-      ↓
-validate cluster health
-```
-
-Mixed-version operation is temporary and allowed only inside an approved compatibility window.
-
-> **If the standby update fails, stop the rolling process. Do not automatically update/risk the remaining healthy active node.**
-
-Keep enough validated rollback/failback capability that the first upgraded node can be abandoned or rolled back if production validation fails before the former active node is upgraded.
-
-### Standalone FW updates
-
-A standalone update that requires service interruption/reboot creates a real forwarding/capture outage.
-
-Finalize active capture segments where possible, journal planned maintenance, and report actual outage/gap behavior truthfully.
-
-Do not describe standalone maintenance as hitless or HA.
-
-### Net-Hunter updates
-
-Net-Hunter update control is layered:
-
-```text
-FreeBSD host
-Stronghold host-management layer
-jails
-jail applications
-processed-record/index schemas
-External UI
-```
-
-Application/derived index migrations must not rewrite authoritative PCAP/source journals.
-
-Planned Hunter update outages pause ingest/query as applicable; FW capture continues and backlog grows locally.
-
-### ZFS irreversible operations
-
-A FreeBSD/ZFS software update does not automatically authorize a ZFS pool feature upgrade.
-
-Treat pool-format/feature upgrades as separate explicit compatibility operations because they can prevent rollback to an older FreeBSD/ZFS stack.
-
-Do not silently enable irreversible pool features merely because new software supports them.
-
-### Update journals
-
-Preserve update lifecycle transitions in Administrative/System journals, including verification, preflight, install, reboot, validation, rollback, and node-ready states.
-
-A failed update/rollback is still factual history and must not be erased by a later successful retry.
-
-## Administrative Authentication and Authorization Rules
-
-### AD is LDAPS only
-
-Active Directory authentication MUST use LDAPS only. No plaintext LDAP and no LDAPS→LDAP downgrade.
-
-Validate configured LDAPS trust/server identity. Validation failure is authentication failure, not permission to weaken transport.
-
-### External authentication
-
-Remote authentication may support LDAPS-based AD, RADIUS, and TACACS+ according to later scope. Protected local identity remains for installation/recovery/break-glass and is not an invisible fallback.
-
-### Authorization separation
-
-Authentication is not authorization.
-
-Keep viewing config, candidate edit, validate, commit, rollback, system/network/security administration, HA administration, appliance update administration, hunting, PCAP export, hold administration, retention administration, and manual destruction separable.
-
-Net-Hunter access is not FW administration authority.
-
-### Management ingress
-
-Normal remote administration belongs on MANAGEMENT. HISTORY and HA are not normal interactive admin paths.
-
-### Administrative journal
-
-Authentication attempts, MFA state where known, sessions, role changes/use, config operations, HA manual actions, update actions, exports, holds, retention/destruction, break-glass, reboot/shutdown, and other privileged activity belong in Administrative Journal.
-
-Never journal passwords, TOTP secrets/codes, private keys, or plaintext credentials.
-
-## Appliance Identity and Trust Rules
-
-Each appliance has stable Appliance ID independent of hostname/IP/current certificate.
-
-History transport uses mTLS and explicit peer authorization. Certificate validity establishes identity but not blanket authorization.
-
-Certificate rotation preserves Appliance ID. Expiry/revocation/peer rejection blocks transfer and creates backlog/degraded state, not dataplane shutdown.
-
-Management/UI and history-transfer certificates are separate purposes.
-
-HA cluster membership likewise requires authenticated explicit membership.
-
-## Time and Timestamp Rules
-
-Store authoritative wall-clock timestamps in UTC. Timezone is presentation only.
-
-Preserve journal/event ordering independently of wall-clock correction with sequence/monotonic context where appropriate.
-
-Initial sync supports multiple NTP sources; NTS/PTP/hardware timestamping are later capabilities.
-
-Preserve clock states such as synchronized, holdover, unsynchronized, and fault.
-
-Do not equate timestamp resolution with accuracy.
-
-Hunter preserves source FW time separately from Hunter receive/verify/process time.
-
-## Journal Rules
-
-Maintain separate journals:
-
-```text
-Administrative
-System / Health
-Traffic Decision
-Trust / Identity
-Time / Clock
-Hunter Processing
-```
-
-Committed entries are append-oriented. Corrections, retries, recovery, retention/destruction, update/rollback results, later success, and superseding interpretation create new entries.
-
-Each journal must preserve stable entry identity, source Appliance ID, local order/sequence, timestamp, type/result, and relevant references such as configuration generation, policy/route/segment/peer/cluster identity.
-
-Traffic Decision Journal explicitly preserves `NOT_PERFORMED` when later pipeline work did not occur.
-
-Hunter preserves source FW journals and appends its own processing history without rewriting source history.
-
-## Retention, Hold, and Destruction Rules
-
-PCAP and each journal domain have independent retention policy.
-
-Age/threshold is eligibility, not destruction authority. Holds override normal retention.
-
-Manual destruction requires explicit privileged authority and reason. Destruction never silently removes the fact that the object existed; journal applicable identity/source/time/integrity/policy/reason/authority/result.
-
-Archive movement is not destruction and preserves identity/integrity/lineage/retrieval state.
-
-## Dedicated History Network Rules
-
-Stronghold FW and Hunter use dedicated history transfer. Current physical direction includes 10/25/40 GbE deployment options.
-
-History transfer is verified mTLS handoff, not blind copy/delete. Hunter MUST NOT ACK until required destination finalization, verification, and durable commit complete, even under storage pressure.
-
-## Net-Hunter Host and Jail Rules
-
-Net-Hunter runs FreeBSD/ZFS/jails. The host owns physical hardware, HBA/raw disks, ZFS, host networking/PF, jail lifecycle, updates, and hardware/storage health.
-
-Application jails do not receive raw host/storage authority merely because they consume datasets.
-
-### PCAP Data Ingest Jail
-
-Receives finalized PCAP/source journals from explicitly authorized FW appliances, verifies and commits, then ACKs verified receipt. No external hunt access.
-
-### Record Processing Jail
-
-Reads authoritative PCAP/source history and produces/enriches searchable records/indexes. It may reprocess history but not rewrite authoritative source history.
-
-### External UI Jail
-
-Read-only for authoritative history. It may hunt/query/search/correlate/view/retrieve/export/report, using writable non-authoritative workspace only.
-
-It must not modify authoritative PCAP/source journals, silently rewrite processed history, delete outside authorized retention workflow, change ingest state, modify FW config backups, or change FW policy through hunt UI.
-
-### FW Configuration Backup Jail
-
-Preserves versioned FW configuration backups. Normal access is authorized FW appliances and local Net-Hunter administration only.
-
-## State and Failure Discipline
-
-Failure behavior is part of the product. Test failure paths with success paths for capture, durability, destructive, privileged, auth/trust, clock, HA, update, and security-sensitive operations.
-
-Examples include:
-
-```text
-packet drop
-capture pressure
-short write / fsync failure
-storage full
-power loss
-segment interruption
-hash mismatch
-transfer failure
-Hunter unavailable/full
-authentication/LDAPS failure
-peer certificate/authorization failure
-clock fault
-journal unavailable
-ZFS/jail failure
-hold/destruction failure
-HA link failure
-HA state-sync lag/out-of-sync
-HA config mismatch
-HA software/protocol incompatibility
-promotion blocked
-fencing failure
-split-brain detection
-update signature failure
-update preflight failure
-schema migration failure
-update validation failure
-rollback failure
-bridge/route/policy application failure
-```
-
-A failed operation is still factual history. A later retry does not erase it.
-
-## Durability Rules
-
-`write()` success is not durability. Do not report durable state until the required OS/filesystem durability boundary completes.
-
-Interrupted artifacts should be preserved where needed for truthful reconciliation.
-
-## Storage, Pressure, and Migration Rules
-
-Only finalized closed segments may be migrated/transferred. A source capture is not deleted merely because destination write/transfer completed; destination finalization, integrity verification, durable commit, and ACK must complete according to contract.
-
-FW storage pressure should expose NORMAL/HIGH/URGENT/CRITICAL. Pressure may throttle secondary work and accelerate safe transfer/tiering, but cannot silently create emergency deletion authority.
-
-By default do not automatically delete unacknowledged authoritative FW history merely to hide a full disk. If exhaustion prevents durable capture, report the history gap.
-
-Hunter pressure preserves ingest/verification/commit first, reduces nonessential processing, and runs only authorized retention not blocked by holds. If Hunter cannot commit, fail ACK so FW retains backlog.
-
-## Secrets and Sensitive Material
-
-Do not intentionally log/journal plaintext credentials, private keys, passphrases, TOTP secrets/codes, or other authentication secrets outside approved secure storage.
-
-Packet captures and firewall configuration backups are highly sensitive. Debug/support/test/export/temp data must not accidentally contain real customer secrets/capture/configuration.
+Phase 0 may establish reproducible capture/hardware baselines useful to later qualification without implementing those later systems early.
 
 ## Repository Operations
 
-Do not perform repository writes unless explicitly authorized for the specific action.
+Do not perform repository writes unless explicitly authorized for the specific action. This includes commit, push, merge, PR creation, branch/ruleset/settings changes, issues, deletion, and other writes.
 
-This includes commit, push, merge, PR creation, branch/ruleset/settings changes, issue creation, deletion, and other writes.
-
-Read-only inspection and local/offline working changes are permitted unless restricted. Permission for one write does not carry forward.
+Read-only inspection and local/offline work are permitted unless restricted. One approval does not carry forward.
 
 ## Engineering Completeness Test
 
-Before treating a Stronghold feature as complete, ask:
-
 > **When this fails at 2:00 AM, will Stronghold tell the operator exactly what it observed, what it decided, why it decided it, what it actually did, and what it could not establish?**
 
-A feature that cannot truthfully answer that question across its important failure paths is not complete.
-
-At minimum, applicable features should preserve enough state/history to answer:
-
-```text
-what was observed?
-what was known?
-what was unknown?
-what was decided?
-why?
-what was actually performed?
-what was NOT_PERFORMED?
-what failed?
-what history remains?
-what was lost or could not be established?
-```
+Important failure paths should preserve enough state/history to answer what was observed, known, unknown, decided, actually performed, `NOT_PERFORMED`, failed, lost, and still recoverable.
 
 ## Review Expectations
 
-Before proposing a change as complete, verify at minimum:
-
-- Wireshark-class capture visibility remains intact;
-- capture priority and raw PCAP authority remain intact;
-- derived interpretation does not rewrite authoritative observation/source journals;
-- packet-loss/degraded states remain truthful;
-- physical observation stays distinct from policy/route/NAT/WAN/HA disposition;
-- default deny and authorization-before-routing remain intact;
-- route/FIB lookup is not silently treated as authorization;
-- Policy ID is not priority;
-- route selection and explicit WAN eligibility remain intact;
-- AD has no plaintext LDAP/downgrade;
-- authentication/authorization/journaling remain separate;
-- appliance identity is distinct from certificate/IP/hostname;
-- timestamp resolution is not presented as accuracy;
-- journals remain separate/append-oriented;
-- retention eligibility is not destruction authority;
-- holds override expiration;
-- storage pressure cannot silently delete unacknowledged history;
-- Hunter cannot ACK uncommitted history;
-- HA virtual forwarding identity is not substituted for physical capture provenance;
-- standby cannot claim ACTIVE merely because one heartbeat path failed;
-- HA control cannot be starved by bulk state sync;
-- configuration/state/software compatibility is explicit in promotion decisions;
-- split-brain prevention/fencing remains explicit;
-- Net-Hunter is not introduced as HA quorum/dataplane dependency;
-- Stronghold FW has not been turned into an unrestricted customer-managed rolling Arch installation;
-- package install/boot success is not substituted for update validation;
-- kernel/NIC/netfilter/capture-path changes retain appropriate regression validation;
-- HA rolling update stops if the standby update/validation fails;
-- mixed-version HA does not silently discard incompatible state;
-- rollback includes schema/state compatibility rather than only old binaries;
-- FreeBSD/ZFS software update does not silently enable irreversible ZFS pool features;
-- External UI authoritative access remains read-only;
-- FW config backup isolation remains intact;
-- the 2:00 AM completeness question can be answered for important failure paths;
-- no future phase was accidentally pulled forward; and
-- applicable nested `AGENTS.md` checks were run/reported.
+Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, and repository-write boundaries above remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine requirements for their subtree but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journal, retention, HA, appliance-update, Net-Hunter isolation, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, UI read-only, configuration-backup, or repository-write requirements.
