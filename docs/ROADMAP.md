@@ -4,7 +4,7 @@
 
 Phase 0 proves that Stronghold can continuously capture configured physical interfaces, durably preserve traffic, truthfully report loss/degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
-**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, VPN, and IDS/IPS are not part of Phase 0.**
+**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, complete management-plane implementation, complete observability/alerting integrations, support/remote-engineering systems, VPN, and IDS/IPS are not part of Phase 0.**
 
 Phase 0 is grounded in the Stronghold truth model:
 
@@ -96,7 +96,7 @@ Freeze Phase 0 workload priority:
 
 Define capture-ring occupancy, packet drops, CPU, memory, NVMe write latency/queue pressure, storage pressure, and transfer-backlog measurements used to throttle secondary work.
 
-Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, and other later systems must obey capture-first priority.
+Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, and other later systems must obey capture-first priority.
 
 ### 0.6 Single-Interface Capture Prototype
 
@@ -115,7 +115,7 @@ Arch Linux x86_64
 
 Capture without protocol allowlisting.
 
-No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, VPN, IDS/IPS, UI, or other later system is required here.
+No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, UI, or other later system is required here.
 
 ### 0.7 Multi-Interface Capture
 
@@ -265,6 +265,27 @@ versioned targeted/full historical reprocessing
 processing/index backlog separation
 historical configuration-to-decision correlation
 traffic-derived result pivot back toward PCAP
+single Stronghold management authority for CLI/API/future FW UI
+configuration vs operational vs historical management state
+native platform drift detection rather than silent import
+stable object identity for automation/history
+stale-candidate/concurrency protection direction
+separate local-console recovery and remote-management trust paths
+Net-Hunter investigation UI does not grant FW configuration authority
+domain-specific health rather than one appliance health bit
+capture/durability/forwarding/Hunter/journal/time/trust/HA/storage health separation
+metrics vs authoritative journal separation
+stateful alert lifecycle and maintenance/suppression semantics
+explicit query-coverage/backlog observability
+SNMPv3/syslog/structured API external-monitoring direction
+no automatic packet/config/support telemetry to ISS
+structured sensitivity-aware support bundles
+explicit PCAP/support-artifact provenance
+no permanent vendor support backdoor or hidden remote tunnel
+customer-initiated/time-bounded/scoped future remote support
+exceptional native engineering access with drift/qualification validation
+hardware vendor preferred/supported OOB management below appliance layer
+Stronghold qualification remains separate from vendor hardware/firmware supportability
 ```
 
 ## Later HA Qualification
@@ -431,6 +452,92 @@ Database/index technology, physical schemas, partitioning, exact Flow ID contrac
 
 An incomplete/rebuilding index must never produce an unqualified `no results` claim.
 
+## Later Management Plane Qualification
+
+The governing architecture is `docs/MANAGEMENT-PLANE.md`.
+
+Freeze and validate:
+
+```text
+single management authority used by CLI/API/future FW UI
+candidate/validate/diff/commit/rollback consistency
+configuration vs operational vs historical state representation
+local console / break-glass boundaries
+remote-management service exposure
+RBAC parity across management surfaces
+stable object identity / automation contracts
+API versioning boundaries
+stale-candidate/concurrency behavior
+secret read/write behavior
+native platform drift detection/reconciliation
+diagnostic vs test vs repair semantics
+administrative attribution/origin-surface journaling
+Hunter UI vs FW management authority separation
+```
+
+A native OS modification is not a Stronghold commit, and an API endpoint does not bypass Stronghold validation/authorization.
+
+## Later Observability / Alerting Qualification
+
+The governing architecture is `docs/OBSERVABILITY.md`.
+
+Freeze and validate:
+
+```text
+health-domain/state model
+overall derived appliance summary rules
+capture/drop/durability health
+storage device vs pressure health
+Hunter backlog dimensions
+query-coverage health
+journal/checkpoint/anchor health
+time and trust health
+HA multidimensional health
+WAN destination/service health
+policy/routing generation/runtime mismatch reporting
+metrics vs journal boundaries
+alert lifecycle / acknowledgement / resolution
+maintenance/suppression behavior
+capacity forecasting
+syslog delivery state
+SNMPv3 object/notification model
+structured API health model
+future webhook adapters
+diagnostic-log retention
+```
+
+A running process/interface link does not prove subsystem/capture health, and alert resolution never erases a historical gap.
+
+## Later Support / Diagnostics / Vendor OOB Qualification
+
+The governing architecture is `docs/SUPPORT-DIAGNOSTICS.md`.
+
+Freeze and validate:
+
+```text
+normal structured diagnostics
+diagnose/test/repair boundaries
+support-bundle manifest
+sensitivity/redaction policy
+explicit PCAP inclusion and provenance
+support bundle encryption/integrity/export
+no automatic ISS upload
+support RBAC
+future remote-support initiation/scope/expiry/revocation
+support identity attribution
+native engineering/break-glass access
+drift/qualification validation after native modification
+temporary debug limits
+crash/core/memory handling
+support-artifact retention
+vendor OOB/BMC management preference
+Stronghold vs BMC trust-domain separation
+vendor-supported vs Stronghold-qualified firmware/hardware state
+recovery-console use through vendor OOB where appropriate
+```
+
+Stronghold does not embed a permanent vendor backdoor or replace the qualified hardware vendor's supported out-of-band management platform.
+
 ## Explicitly Deferred — VPN
 
 **VPN is shelved/deferred.**
@@ -459,6 +566,7 @@ exact supported hardware profiles
 Net-Hunter off-system backup/replication/archive architecture
 exact Net-Hunter database/index technology and physical schemas
 exact Net-Hunter query language/API/partitioning strategy
+installation / factory provisioning / first-boot bootstrap architecture
 later dynamic-routing implementation contracts
 exact future Layer-7 boundaries
 VPN — deferred
