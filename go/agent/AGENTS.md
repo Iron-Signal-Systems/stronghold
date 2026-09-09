@@ -74,6 +74,33 @@ policy activated != endpoint enforcement healthy
 
 The Agent is not an independent Stronghold Policy Engine.
 
+## Network Context and Policy Generations
+
+Agent policy may reflect network-side context established by Stronghold FW or qualified network-admission sources and correlated by Stronghold Access.
+
+Preferred flow:
+
+```text
+FW / network admission
+    establishes VLAN / zone / attachment context
+        ↓
+Stronghold Access
+    evaluates applicable policy
+        ↓
+signed monotonic Agent policy generation
+        ↓
+Stronghold Agent
+    verifies / validates / programs WFP
+```
+
+Do not implement endpoint policy as ad hoc per-packet commands from FW to Agent.
+
+The Agent may observe local interface/address state, but it must never self-promote into a trusted VLAN/zone or broader authorization scope.
+
+```text
+Agent reports VLAN/zone != network-side VLAN/zone established
+```
+
 ## Stronghold FW Boundary
 
 Stronghold FW remains an independent network PEP.
@@ -86,6 +113,8 @@ endpoint DENY  != FW observed DENY
 ```
 
 If the Agent denies a connection before network transmission, record an endpoint denial. Do not manufacture a FW observation for traffic the FW never received.
+
+The Agent may reduce unnecessary FW processing by stopping disallowed connections locally, but it can never grant network permission that the FW would otherwise deny.
 
 ## Process / Application Identity
 
@@ -112,6 +141,20 @@ service/protocol
 ```
 
 Do not claim stronger identity than Windows and the selected collection/enforcement point can actually establish.
+
+## Initial Enforcement Boundary
+
+The first Agent enforcement implementation should favor Windows-native connection/application authorization through WFP rather than building a general packet-inspection stack.
+
+```text
+process/application aware
+!=
+deep payload aware
+```
+
+Do not introduce a kernel-mode WFP callout driver, local TLS proxy, or general deep-Layer-7 engine merely to strengthen marketing terminology.
+
+If later requirements genuinely need payload-aware enforcement, freeze and qualify that design separately for protocol coverage, TLS handling, driver signing, kernel attack surface, crash/BSOD risk, Windows compatibility, performance, privacy, logging/retention, diagnostics, and fail-open/fail-closed behavior.
 
 ## Protected Endpoint
 
@@ -213,6 +256,8 @@ posture unavailable          != posture passed
 tunnel up                    != resource authorized
 endpoint policy current      != FW policy current
 endpoint denied locally      != FW denied packet
+network context received     != endpoint policy activated
+application identified       != application trusted
 ```
 
 ## Security Principle
