@@ -2,7 +2,14 @@
 
 ## Purpose
 
-This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace `docs/ARCHITECTURE.md`, `docs/NET-HUNTER-RECORDS.md`, or `docs/ROADMAP.md`.
+This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace the governing architecture/roadmap documents:
+
+- `docs/ARCHITECTURE.md`
+- `docs/NET-HUNTER-RECORDS.md`
+- `docs/MANAGEMENT-PLANE.md`
+- `docs/OBSERVABILITY.md`
+- `docs/SUPPORT-DIAGNOSTICS.md`
+- `docs/ROADMAP.md`
 
 ## Governing Principles
 
@@ -24,9 +31,17 @@ This file defines how contributors, coding agents, and automation work within th
 
 > **An incomplete index is not complete history.**
 
+> **Stronghold has one management authority and multiple management surfaces.**
+
+> **Health is domain-specific; one healthy subsystem must not hide failure in another.**
+
+> **Stronghold has no permanent vendor backdoor.**
+
 ## Product Model
 
 ### Stronghold FW
+
+Stronghold FW owns live-network responsibilities:
 
 ```text
 observe
@@ -42,6 +57,8 @@ transfer verified history to Net-Hunter
 ```
 
 ### Stronghold Net-Hunter
+
+Stronghold Net-Hunter owns historical responsibilities:
 
 ```text
 receive
@@ -81,13 +98,15 @@ Derived data remains traceable to authoritative source data. Reprocessing may cr
 
 > **If a frame or packet is presented to a configured Stronghold physical interface and is observable through the supported NIC/driver capture path, Stronghold records it whether or not Stronghold recognizes, decodes, bridges, routes, or firewall-processes it.**
 
-Wireshark/dumpcap on the same supported physical interface under the same conditions is the visibility reference.
+Wireshark/dumpcap on the same supported physical interface under the same conditions is the reference visibility baseline.
 
 Unknown EtherTypes, unknown IP protocols, malformed/vendor-specific traffic, and Layer-2/control-plane traffic are not discarded merely because Stronghold does not understand them.
 
 RAM is buffering only, not durable capture.
 
 Initial acquisition direction is AF_PACKET/TPACKET_V3 unless later measured/approved contracts justify another path.
+
+Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, and other secondary activity.
 
 ## Authorization and Forwarding Rules
 
@@ -144,50 +163,75 @@ NAT is separate from authorization. WAN eligibility is explicit per destination/
 Never collapse these distinctions:
 
 ```text
-route available                 != route authorized
-certificate valid               != peer authorized
-packet not decoded              != packet not observed
-no journal record               != event did not occur
-timestamp precision             != timestamp accuracy
-policy allowed                  != forwarding succeeded
-object expired                  != destruction authorized
-bytes received                  != history durably committed
-archived                        != destroyed
-new interpretation              != new historical observation
-forwarding HA succeeded         != capture continuity guaranteed
-virtual cluster identity        != physical capture identity
-software installed              != Stronghold update validated
-configuration restored          != appliance validated
-backup written                  != backup proven restorable
-ZFS redundancy                  != disaster recovery
-disk encrypted                  != secrets safely designed
-TPM protected                   != disaster recoverable
-cluster member                  != shared local disk key
-key rotated                     != past exposure undone
-entry written                   != journal entry durably committed
-hash chain valid                != checkpoint externally anchored
-signed checkpoint               != physically immutable storage
-new journal epoch               != uninterrupted history
-system booted                   != approved system state
-Secure Boot enabled             != measured boot verified
-measured boot available         != attestation performed
-Appliance ID                    != TPM identity
-hardware detected               != hardware qualified
-hardware compatible             != hardware supported
-link speed                      != validated dataplane rate
-capture throughput              != full-feature firewall throughput
-node performance                != HA cluster performance
-storage capacity                != sustainable ingest capacity
-database record                 != authoritative packet
-no indexed result               != no traffic
-index unavailable               != history unavailable
-source history available        != index complete
-reprocessing result             != original knowledge
-timeline                        != authoritative journal
-exported PCAP                   != original PCAP segment
-current hostname association    != historical hostname association
-direct observation              != correlated association
-processing failed               != source history lost
+route available                    != route authorized
+certificate valid                  != peer authorized
+packet not decoded                 != packet not observed
+no journal record                  != event did not occur
+timestamp precision                != timestamp accuracy
+policy allowed                     != forwarding succeeded
+object expired                     != destruction authorized
+bytes received                     != history durably committed
+archived                           != destroyed
+new interpretation                 != new historical observation
+forwarding HA succeeded            != capture continuity guaranteed
+virtual cluster identity           != physical capture identity
+software installed                 != Stronghold update validated
+configuration restored             != appliance validated
+backup written                     != backup proven restorable
+ZFS redundancy                     != disaster recovery
+disk encrypted                     != secrets safely designed
+TPM protected                      != disaster recoverable
+cluster member                     != shared local disk key
+key rotated                        != past exposure undone
+entry written                      != journal entry durably committed
+hash chain valid                   != checkpoint externally anchored
+signed checkpoint                  != physically immutable storage
+new journal epoch                  != uninterrupted history
+system booted                      != approved system state
+Secure Boot enabled                != measured boot verified
+measured boot available            != attestation performed
+Appliance ID                       != TPM identity
+hardware detected                  != hardware qualified
+hardware compatible                != hardware supported
+link speed                         != validated dataplane rate
+capture throughput                 != full-feature firewall throughput
+node performance                   != HA cluster performance
+storage capacity                   != sustainable ingest capacity
+database record                    != authoritative packet
+no indexed result                  != no traffic
+index unavailable                  != history unavailable
+source history available           != index complete
+reprocessing result                != original knowledge
+timeline                           != authoritative journal
+exported PCAP                      != original PCAP segment
+current hostname association       != historical hostname association
+direct observation                 != correlated association
+processing failed                  != source history lost
+native OS change                   != Stronghold configuration commit
+configured state                   != operational state
+operational state                  != historical state
+API access                         != commit permission
+same identity provider             != same active session
+Hunter UI access                   != FW administration authority
+diagnostic action                  != repair action
+secret configured                  != secret readable
+process running                    != subsystem healthy
+interface UP                       != capture healthy
+capture worker running             != PCAP durable
+alert acknowledged                 != fault resolved
+alert suppressed                   != event not recorded
+alert resolved                     != historical gap erased
+syslog delivered                   != journal committed
+support access                     != configuration authority
+support access                     != history-destruction authority
+support bundle created             != support bundle transmitted
+support PCAP                       != authoritative source segment
+engineering shell exited           != platform state validated
+Stronghold administration          != BMC administration
+vendor-supported hardware          != Stronghold-qualified hardware
+vendor-supported firmware          != Stronghold-qualified firmware
+BMC access                         != Stronghold configuration authority
+hardware change completed          != Stronghold platform validation passed
 ```
 
 ## Failure-State Discipline
@@ -210,6 +254,7 @@ recovery_required
 continuity_gap
 processing_pending
 index_incomplete
+configuration_drift
 ```
 
 Do not infer success from absence of error. A later successful retry does not erase a failed operation.
@@ -420,60 +465,93 @@ Direct observation and correlated association must remain distinguishable.
 
 Unknown, unsupported, malformed, partially parsed, and decoder-error traffic must remain discoverable where lower-level observation metadata permits.
 
-### Search completeness
-
 > **Stronghold must never present an incomplete index as complete history.**
 
-A query over incomplete/rebuilding derived state must expose coverage or incompleteness rather than returning an unqualified `no results` conclusion.
-
-Preserve distinctions such as:
-
-```text
-not observed
-not captured
-captured but not processed
-processed but not decoded
-decoded but not indexed
-indexed and no result
-history destroyed
-history unavailable
-```
-
-When indexes are incomplete/unavailable, retain the ability to fall back toward the segment catalog and candidate authoritative PCAP rather than treating the system as historically blind.
-
-### Reprocessing
+A query over incomplete/rebuilding derived state must expose coverage/incompleteness rather than returning an unqualified `no results` conclusion.
 
 Reprocessing creates new/superseding derived interpretation and MUST NOT alter source PCAP/journals or imply that later understanding was known at original observation time.
 
-Preserve decoder/correlator identity, processing time/generation, source object lineage, and supersession state where applicable.
-
-For significant reprocessing/schema changes, prefer building/validating a new derived generation before switching the default query generation rather than leaving a partially migrated live search state.
-
-Targeted and full reprocessing operations are Hunter Processing Journal events.
-
-### Processing boundaries and backlog
-
 Record Processing Jail may read authoritative PCAP/source journals and write derived records/indexes, but MUST NOT rewrite authoritative history.
 
-Distinguish:
+Distinguish transfer, ingest, processing, reprocessing, and index-rebuild backlog.
+
+Where source PCAP remains retained, traffic-derived results preserve enough lineage to locate applicable source segments.
+
+## Management Plane Rules
+
+`docs/MANAGEMENT-PLANE.md` defines the governing management-plane architecture.
+
+CLI, API, and any future FW management UI are clients of one Stronghold management authority. No surface gets a separate configuration truth or bypass around candidate validation, authorization, commit, generation, or journaling.
+
+Preserve:
 
 ```text
-TRANSFER BACKLOG
-INGEST BACKLOG
-PROCESSING BACKLOG
-REPROCESSING BACKLOG
-INDEX REBUILD BACKLOG
+CONFIGURATION STATE
+OPERATIONAL STATE
+HISTORICAL STATE
 ```
 
-Current receive/verify/durable commit work outranks historical reprocessing.
+Native Linux/FreeBSD state is implementation state below Stronghold. Direct native changes are not silently imported into Stronghold configuration; material divergence becomes drift/mismatch requiring explicit reconciliation/validation.
 
-### PCAP pivot and export
+Local console/break-glass recovery and normal remote management are separate trust paths.
 
-Where source PCAP remains retained, traffic-derived results must preserve enough lineage to locate the applicable source segment(s).
+The Net-Hunter External UI remains an investigation surface and does not gain FW configuration authority.
 
-A hunt-created PCAP export is a derived extract with export provenance; it is not the original authoritative segment even if its packet bytes are exact copies.
+Automation uses stable object/service identity rather than relying only on mutable names or shared human credentials.
 
-Historical decision correlation must use the configuration generation active at decision time, not today's policy merely because the Policy ID is unchanged.
+Secret configuration is not ordinarily readable back in plaintext.
+
+Preserve diagnose/test/repair behavioral distinctions.
+
+## Observability / Alerting Rules
+
+`docs/OBSERVABILITY.md` defines the governing observability architecture.
+
+Health is domain-specific. Keep capture, PCAP durability, forwarding, policy, routing, WAN, HA, Hunter/history transfer, journals, time, trust, storage, hardware, and platform/update state independently observable.
+
+Do not infer subsystem health from process uptime or interface-link state.
+
+High-frequency metrics and authoritative journals are separate stores/purposes. Metrics measure; journals preserve meaningful authoritative transitions/actions.
+
+Alert acknowledgement/suppression/resolution never rewrites journal history or erases a capture/durability gap.
+
+External syslog, SNMP, API, and future webhook systems consume Stronghold state; they do not become authority for it.
+
+Use secure SNMPv3 direction for new monitoring integration rather than designing around community-string SNMPv1/v2c.
+
+No automatic packet/configuration/support telemetry is sent to Iron Signal Systems.
+
+## Support / Diagnostics / Vendor OOB Rules
+
+`docs/SUPPORT-DIAGNOSTICS.md` defines the governing support architecture.
+
+Stronghold has no permanent vendor support account, hidden SSH key, hidden VPN, persistent reverse shell, or automatic remote-support tunnel.
+
+Prefer structured normal diagnostics before native engineering access.
+
+Support bundles are manifest-driven and sensitivity-aware. PCAP, secrets, private keys, and crash/core/memory content are never silently included.
+
+Creating a support bundle is distinct from transmitting it. Support artifacts/telemetry are not automatically sent to Iron Signal Systems.
+
+Future remote support, if implemented, is customer initiated, time bounded, scoped, visible, attributable, and revocable.
+
+Support access does not imply configuration, retention/destruction, key-recovery, or HA administrative authority.
+
+Native engineering/root access is exceptional. After native modification, perform drift/platform-qualification validation; do not silently treat native state as a Stronghold commit.
+
+Support/debug/compression/diagnostic activity throttles before live capture is sacrificed.
+
+### Vendor hardware management preference
+
+When access below the Stronghold appliance layer is required, use the qualified hardware vendor's preferred/supported out-of-band management platform and procedures where practical.
+
+Stronghold does not replace the vendor BMC/OOB platform. Stronghold validates the resulting hardware/firmware state against the Stronghold-qualified appliance profile.
+
+BMC/OOB administration and Stronghold administration are separate trust domains.
+
+Vendor-supported hardware/firmware does not automatically equal Stronghold-qualified hardware/firmware.
+
+Vendor OOB access must not become a hidden path over PRODUCTION, HISTORY, or HA.
 
 ## Resource Priority
 
@@ -490,10 +568,10 @@ FW priority intent:
 8. HA bulk state sync
 9. Hunter transfer
 10. compression where approved
-11. deeper analytics outside live path
+11. deeper analytics / observability / support work outside live path
 ```
 
-Checkpoint signing, update work, bulk HA state, and analytics must throttle rather than hide capture loss.
+Checkpoint signing, update work, bulk HA state, observability collection, support bundles, debug tracing, and analytics must throttle rather than hide capture loss.
 
 ## Explicit Deferrals
 
@@ -507,9 +585,9 @@ Nothing built now should prevent future detection from reading authoritative PCA
 
 Implementation begins with FW Phase 0 Traffic Observation Foundation.
 
-Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Phase 0 may establish reproducible capture/hardware baselines useful to later qualification without implementing those later systems early.
+Phase 0 may establish reproducible capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support systems early.
 
 Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
@@ -525,12 +603,14 @@ Read-only inspection and local/offline work are permitted unless restricted. One
 
 Important failure paths should preserve enough state/history to answer what was observed, known, unknown, decided, actually performed, `NOT_PERFORMED`, failed, lost, and still recoverable.
 
-For Hunter search, the same test includes whether a `no results` answer came from complete history/index coverage or merely from incomplete processing/decoding/indexing.
+For Hunter search, the same test includes whether a `no results` answer came from complete history/index coverage or merely incomplete processing/decoding/indexing.
+
+For management/health/support work, the same test includes whether the operator can distinguish intended configuration from runtime state, determine which responsibility is degraded, and identify what diagnostic/support action changed or did not change appliance state.
 
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, and repository-write boundaries above remain intact.
+Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, and repository-write boundaries remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, Net-Hunter provenance/search/reprocessing, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, UI read-only, configuration-backup, or repository-write requirements.
