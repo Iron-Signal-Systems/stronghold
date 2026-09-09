@@ -124,6 +124,37 @@ Communication occurs through explicit versioned protocol/schema contracts.
 
 Do not move endpoint WFP implementation into Access for convenience.
 
+## Endpoint Policy Distribution
+
+Stronghold Access owns policy evaluation and distribution to Stronghold Agent. It does not directly implement endpoint packet filtering.
+
+Integrated policy flow should preserve:
+
+```text
+FW / network admission establishes network context
+        ↓
+Stronghold Access correlates context + identity + posture
+        ↓
+Stronghold Access evaluates policy
+        ↓
+signed monotonic Agent policy generation
+        ↓
+Stronghold Agent verifies / validates / programs WFP
+```
+
+Do not use ad hoc per-packet commands from FW to Agent as the endpoint policy model.
+
+Preserve:
+
+```text
+network context received  != endpoint policy evaluated
+policy generated          != policy delivered
+policy delivered          != policy activated
+policy activated          != Agent enforcement healthy
+```
+
+The endpoint must not be able to self-assert a trusted VLAN/zone and obtain broader policy. Network-side context must retain source, generation/freshness, and confidence sufficient for authorization use.
+
 ## Stronghold FW Boundary
 
 Stronghold Access is a bolt-on peer to Stronghold FW, not part of the FW process image.
@@ -136,9 +167,25 @@ Preserve:
 
 ```text
 Access GRANT != FW ALLOW
+endpoint ALLOW != FW ALLOW
 ```
 
 FW remains an independent network PEP.
+
+FW-supplied VLAN/zone/interface/address context may be an input to Access policy, but Access must preserve that context as a sourced fact rather than silently convert it into permanent endpoint trust.
+
+## Local Endpoint Enforcement Boundary
+
+Access may authorize Agent-side process/application-aware connection enforcement so clearly unauthorized traffic can be stopped before reaching the LAN, WireGuard transport, or Stronghold FW.
+
+That optimization does not move endpoint implementation into Access and does not change FW authority.
+
+```text
+endpoint DENY != FW observed DENY
+endpoint ALLOW != FW ALLOW
+```
+
+Initial endpoint enforcement is not a requirement for general deep-payload inspection. A future local proxy or WFP callout-driver design requires separate approval and qualification.
 
 ## Shared-Code Rule
 
@@ -184,9 +231,11 @@ AAA authenticated         != Stronghold authorized
 certificate valid         != device authorized
 posture unavailable       != posture passed
 CoA requested             != CoA applied
+FW reports VLAN/zone      != endpoint permanently trusted
 policy sent               != policy activated
 Agent reachable           != Agent enforcement healthy
 FW reachable              != FW authorization granted
+endpoint process allowed  != FW traffic allowed
 ```
 
 ## Security Principle
