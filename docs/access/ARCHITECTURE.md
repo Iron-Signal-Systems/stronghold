@@ -111,6 +111,8 @@ The exact wire schema, signing, replay protection, sequencing, lease behavior, a
 
 > **An Access GRANT does not force Stronghold FW to forward traffic.**
 
+> **Endpoint ALLOW never grants permission that Stronghold FW would otherwise deny.**
+
 Mandatory separations include:
 
 ```text
@@ -121,6 +123,8 @@ device trusted                   != posture acceptable
 posture acceptable               != process authorized
 process authorized               != resource authorized
 Access GRANT                     != FW ALLOW
+endpoint ALLOW                   != FW ALLOW
+endpoint DENY                    != FW observed DENY
 WireGuard peer authenticated     != user authenticated
 tunnel established              != resource authorized
 network assignment               != trusted endpoint
@@ -322,6 +326,91 @@ The Agent is not an independent Stronghold Policy Engine and must not silently g
 
 See `docs/agent/ARCHITECTURE.md`.
 
+## Network Context and Endpoint Policy Distribution
+
+When Stronghold FW is present, it can contribute network-side facts that the endpoint itself cannot authoritatively self-assert, including observed VLAN, zone, interface, address association, and other qualified attachment context.
+
+The intended control flow is:
+
+```text
+Stronghold FW
+    establishes network-side context
+        |
+        | authenticated/versioned fact exchange
+        v
+Stronghold Access
+    correlates endpoint + network context
+    evaluates applicable policy
+        |
+        | signed monotonic endpoint policy generation
+        v
+Stronghold Agent
+    verifies / validates / programs WFP
+        |
+        v
+local endpoint PEP
+```
+
+The endpoint does not become trusted merely because it reports that it is on a particular VLAN or network.
+
+```text
+Agent-reported VLAN / zone
+!=
+FW- or admission-established VLAN / zone
+
+network context received
+!=
+endpoint policy activated
+
+endpoint policy activated
+!=
+endpoint enforcement healthy
+```
+
+Policy distribution should be generation-based and bounded rather than a chatty per-packet control protocol. A network-context change may cause Access to reevaluate and publish a new endpoint policy generation, but live packet forwarding on Stronghold FW must not depend on synchronous endpoint-policy delivery.
+
+## Local Endpoint Enforcement Assistance
+
+Stronghold Access may authorize Stronghold Agent to reject disallowed application/process connections locally before those connections reach the LAN, WireGuard transport, or Stronghold FW.
+
+This provides an additional enforcement point close to the originating process and can reduce unnecessary work presented to the network firewall.
+
+Conceptually:
+
+```text
+process connection request
+        |
+        v
+Stronghold Agent / WFP PEP
+        |
+   +----+----+
+   |         |
+ DENY      ALLOW
+   |         |
+local        v
+record    network path
+             |
+             v
+        Stronghold FW
+             |
+             v
+       independent policy
+```
+
+The optimization never changes authority:
+
+```text
+endpoint rejected traffic
+!=
+FW denied traffic
+
+endpoint permitted traffic
+!=
+FW authorized traffic
+```
+
+The first Windows direction is process/application-aware connection authorization, not a requirement for endpoint deep-payload inspection. Any later payload-aware proxy or WFP callout-driver architecture is separately qualified.
+
 ## Protected Endpoint Integration
 
 Stronghold Access may place selected endpoints into a **Protected Endpoint** mode implemented by Stronghold Agent.
@@ -387,6 +476,7 @@ administrative revoke
 device compromise state
 Access Session expiration
 network-admission state change
+network-context change
 ```
 
 Where supported and authorized, RADIUS Dynamic Authorization / Change of Authorization may be used to request reauthentication, quarantine, or disconnect at the network-admission layer.
@@ -394,13 +484,13 @@ Where supported and authorized, RADIUS Dynamic Authorization / Change of Authori
 Conceptually:
 
 ```text
-posture / trust changes
+posture / trust / network context changes
         |
         v
 Stronghold Access reevaluates
         |
         v
-REVOKE
+REVOKE / NEW POLICY GENERATION
    +----+-------------------+
    |                        |
    v                        v
@@ -439,6 +529,7 @@ Stronghold Access Session
 Stronghold Agent endpoint decision
 Stronghold FW decision
 WireGuard transport/session state
+network-context generation
 related authoritative packet segments
 ```
 
@@ -528,6 +619,7 @@ application/process binding semantics
 MFA model
 posture model
 policy language / generations
+network-context fact contract from FW/admission
 Agent control protocol
 FW bolt-on control protocol
 mTLS / trust / certificate lifecycle
