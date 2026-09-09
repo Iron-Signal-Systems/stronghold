@@ -133,7 +133,7 @@ Design Linux-owned code for Linux. Do not weaken or abstract away useful Linux b
 
 Compile-time portability is not more important than truthful behavior.
 
-Use Linux-native facilities where appropriate, including packet sockets, memory mapping, netlink, filesystem durability primitives, cgroups/systemd resource controls, and later nftables integration.
+Use Linux-native facilities where appropriate, including XDP/AF_XDP, memory mapping, netlink, filesystem durability primitives, cgroups/systemd resource controls, and later nftables integration.
 
 Do not replace an appropriate native or structured Linux interface with parsing shell command output merely for convenience.
 
@@ -157,23 +157,50 @@ termination conditions
 alignment
 packet lengths
 capture metadata
+AF_XDP descriptor ownership
+ring indices
+queue identity
+UMEM offsets / frame boundaries
 ```
 
-Do not trust a mapped ring or native buffer merely because a system call returned success.
+Do not trust a mapped ring, AF_XDP descriptor, UMEM frame, or native buffer merely because a system call returned success.
 
 Keep `unsafe` usage narrow and isolated to the native boundary where practical.
 
 ## Capture Engineering
 
-The initial preferred capture source is AF_PACKET with TPACKET_V3.
+The Stronghold FW packet-acquisition foundation is **AF_XDP**. The governing capture architecture is `docs/AF-XDP.md`.
+
+AF_PACKET/TPACKET_V3 is not the planned primary Phase 0 capture implementation and must not be introduced as a silent fallback that preserves an AF_XDP qualification claim.
+
+Phase 0 capture engineering must explicitly handle and expose the AF_XDP/XDP concepts that affect correctness and performance, including as applicable:
+
+```text
+XDP attachment mode
+AF_XDP socket / RX queue binding
+UMEM ownership
+fill / completion rings
+RX descriptor lifecycle
+ring sizing
+batching / wake-up behavior
+RSS / multi-queue distribution
+queue-to-worker affinity
+CPU / NUMA / PCIe locality
+copy vs zero-copy operating mode
+drop / starvation accounting
+```
+
+Zero-copy is a qualification target where supported by the selected NIC/driver profile, not an assumption. The exact operating mode used by a supported profile must be visible and testable.
 
 Capture workers must expose truthful packet and drop accounting.
 
-Do not apply BPF filters to the authoritative configured full-capture stream merely to satisfy downstream offload or retention selection.
+Do not apply XDP/eBPF filters to the authoritative configured full-capture stream merely to satisfy downstream offload or retention selection.
 
-Prefer one simple measurable capture path first. Add fanout, queue-specific scaling, CPU affinity, AF_XDP, or other optimizations only when profiling demonstrates a need or a later approved requirement demands them.
+Keep the Phase 0 XDP program minimal and measurable. Do not turn XDP/eBPF into a second firewall-policy engine before the authoritative capture path is proven.
 
-Capture code must not block on compression, remote offload, deep indexing, or analytics.
+Prefer one simple measurable AF_XDP ownership model first. Add queue sharing, generalized worker frameworks, advanced steering, or other complexity only when measurement justifies it.
+
+Capture code must not block on compression, remote offload, deep indexing, analytics, or other secondary work.
 
 ## Error and State Handling
 
@@ -217,7 +244,7 @@ Never delete the source capture during tier migration until the destination has 
 Stronghold's resource-priority order is:
 
 ```text
-1. packet receive
+1. AF_XDP packet receive / ring service
 2. active RAM-to-hot-tier PCAP writes
 3. segment finalization / minimum integrity metadata
 4. essential catalog state
@@ -229,7 +256,7 @@ Stronghold's resource-priority order is:
 
 Compression, tiering, offload, and analysis workers must be designed so they can throttle or pause without blocking the capture path.
 
-Any observed packet loss or sustained capture-ring pressure must be capable of triggering suspension/throttling of nonessential background work.
+Any observed packet loss, AF_XDP ring starvation, fill-ring starvation, or sustained capture pressure must be capable of triggering suspension/throttling of nonessential background work.
 
 ## Tests
 
@@ -240,9 +267,14 @@ Test successful behavior and failure/refusal behavior.
 Capture-, integrity-, and durability-sensitive work requires explicit failure tests, including as applicable:
 
 ```text
-malformed ring metadata
+malformed AF_XDP descriptor
+invalid UMEM offset / frame boundary
+queue/socket mismatch
+RX-ring starvation
+fill-ring starvation
 short packet data
 packet-drop reporting
+copy/zero-copy mode mismatch
 short write
 storage full
 fsync failure
@@ -267,7 +299,7 @@ go test ./...
 go vet ./...
 ```
 
-Stronghold's Linux-native capture and durability behavior must be runtime-tested on Linux. Cross-compilation alone does not prove packet-ring behavior, packet-loss accounting, filesystem durability, cgroup priority behavior, storage-pressure behavior, or power-loss recovery.
+Stronghold's Linux-native AF_XDP capture and durability behavior must be runtime-tested on Linux. Cross-compilation alone does not prove XDP attachment, AF_XDP queue binding, UMEM/ring behavior, packet-loss accounting, copy/zero-copy mode, CPU/NUMA locality, filesystem durability, cgroup priority behavior, storage-pressure behavior, or power-loss recovery.
 
 If a required runtime check could not be executed, state that explicitly.
 
@@ -276,6 +308,7 @@ If a required runtime check could not be executed, state that explicitly.
 Before finishing a Go implementation slice, verify:
 
 - code follows the current Stronghold roadmap and architecture;
+- AF_XDP remains the intended capture foundation;
 - capture priority has not been weakened;
 - packet-loss and degraded states remain truthful;
 - Linux-native behavior is appropriate;
