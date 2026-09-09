@@ -56,6 +56,8 @@ endpoint Policy Enforcement Point
 
 Windows-owned behavior should use appropriate native Windows APIs and facilities rather than depend on repeated parsing of shell-command output.
 
+The initial enforcement direction is process/application-aware connection authorization through Windows Filtering Platform before an unauthorized connection needs to traverse the LAN, WireGuard transport, or Stronghold FW.
+
 The exact WFP layers, filter ownership model, service privileges, signing model, installation model, certificate/key storage, update mechanism, and supported Windows versions remain to be frozen before implementation.
 
 ## Endpoint Facts
@@ -137,6 +139,8 @@ Stronghold Agent / WFP PEP
  result   network / tunnel path
 ```
 
+The purpose is not merely duplicate filtering. Local enforcement can reject clearly unauthorized application/process connections before Stronghold FW must spend resources processing them, while preserving the FW as an independent network authority for traffic that does leave the endpoint.
+
 A locally denied connection must be recorded as an endpoint fact.
 
 ```text
@@ -146,6 +150,28 @@ FW denied packet
 ```
 
 Stronghold must not fabricate a Stronghold FW observation when no packet was presented to the FW.
+
+## Layer-7 Boundary
+
+The initial Agent design may use **application/process identity** as an authorization fact without claiming that the endpoint is performing general deep packet inspection.
+
+This distinction is mandatory:
+
+```text
+originating process identified
+!=
+payload decoded
+
+application-aware connection policy
+!=
+deep Layer-7 payload inspection
+```
+
+The first Windows implementation direction is deliberately limited to native endpoint connection/application enforcement where practical through WFP and related Windows APIs.
+
+Any future payload-aware capability that requires a local proxy, stream inspection, or kernel-mode WFP callout driver is a separate implementation and qualification decision. It must not be introduced merely to call the Agent a Layer-7 product.
+
+A future deep-L7 design would require explicit review of protocol coverage, TLS handling, driver signing, kernel attack surface, crash/BSOD risk, upgrade compatibility, performance, privacy, logging/retention, and fail-open/fail-closed behavior.
 
 ## Stronghold Access Relationship
 
@@ -188,6 +214,44 @@ policy verified       != policy activated
 policy activated      != enforcement verified
 Agent service running != endpoint PEP healthy
 ```
+
+## Network Context from Stronghold Access / FW
+
+The Agent may consume signed policy that reflects network-side context established by Stronghold Access, Stronghold FW, or qualified network-admission sources.
+
+A preferred integrated flow is:
+
+```text
+Stronghold FW / network admission
+    establishes VLAN / zone / attachment facts
+        |
+        v
+Stronghold Access
+    correlates endpoint identity + network context
+    evaluates applicable endpoint policy
+        |
+        | signed monotonic policy generation
+        v
+Stronghold Agent
+    verifies / validates / programs WFP
+        |
+        v
+endpoint PEP
+```
+
+The Agent may also observe local interface/address information, but it must not use self-reported network state to promote itself into a trusted VLAN/zone or broader authorization scope.
+
+```text
+Agent reports VLAN / zone
+!=
+network-side VLAN / zone established
+
+network context changed
+!=
+new endpoint policy activated
+```
+
+Network-context changes should cause policy reevaluation through Stronghold Access rather than trigger ad hoc per-packet commands from the FW. Policy distribution should use signed/versioned generations with explicit lease/holdover behavior.
 
 ## Operating Modes
 
@@ -336,6 +400,8 @@ An endpoint ALLOW never grants network permission that Stronghold FW would other
 
 Stronghold FW may correlate authenticated Access Session and Agent-established facts with the network traffic actually presented to it.
 
+Where the FW provides network-side context to Access, that context may influence the next signed Agent policy generation. The FW should not directly micromanage individual endpoint WFP filters outside the versioned Access/Agent contract.
+
 ## Network Admission / 802.1X Relationship
 
 Stronghold Agent does not replace the operating system's appropriate 802.1X supplicant or enterprise network-admission system merely to centralize everything inside the Agent.
@@ -389,6 +455,7 @@ user / subject identity
 application / process identity
 process path / signature identity where established
 source network context
+network-context generation/source
 destination / resource
 service / protocol
 Access Session ID
@@ -470,6 +537,7 @@ application / process
 Network Access Session
 Stronghold Access Session
 Policy Generation
+network-context generation/source
 resource
 service
 endpoint decision
@@ -521,6 +589,7 @@ certificate / key protection
 Stronghold Access control protocol
 policy bundle schema / signing
 policy generation / lease / holdover
+network-context fact source/generation
 WFP integration / layer selection
 filter ownership / cleanup
 application / process identity semantics
@@ -542,6 +611,24 @@ other-VPN coexistence policy
 failure / recovery behavior
 Hunter correlation
 health / observability
+```
+
+Before any deep payload-aware endpoint inspection is added, separately freeze and validate:
+
+```text
+why connection/process identity is insufficient
+selected proxy or WFP callout-driver architecture
+protocol coverage
+TLS handling
+kernel/user boundary
+code/driver signing
+Windows-version compatibility
+crash / BSOD containment
+performance / latency
+privacy / data handling
+logging / retention
+support diagnostics
+failure behavior
 ```
 
 ## Engineering Principle
