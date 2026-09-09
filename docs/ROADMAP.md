@@ -96,7 +96,7 @@ Freeze Phase 0 workload priority:
 
 Define capture-ring occupancy, packet drops, CPU, memory, NVMe write latency/queue pressure, storage pressure, and transfer-backlog measurements used to throttle secondary work.
 
-Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, and other later systems must obey capture-first priority.
+Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, IDS/proxy work, and other later systems must obey capture-first priority.
 
 ### 0.6 Single-Interface Capture Prototype
 
@@ -115,7 +115,7 @@ Arch Linux x86_64
 
 Capture without protocol allowlisting.
 
-No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, UI, or other later system is required here.
+No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, TLS/application proxying, UI, or other later system is required here.
 
 ### 0.7 Multi-Interface Capture
 
@@ -286,6 +286,20 @@ customer-initiated/time-bounded/scoped future remote support
 exceptional native engineering access with drift/qualification validation
 hardware vendor preferred/supported OOB management below appliance layer
 Stronghold qualification remains separate from vendor hardware/firmware supportability
+selective TLS/application proxying as future inspection path
+inspection remains encrypted on both sides of FW proxy
+FW decrypted inspection payload is volatile-only and not intentionally persisted
+purpose-specific mutually authenticated encrypted IDS transport
+HISTORY and INSPECTION transport authority/identity/resource separation
+future isolated Net-Hunter IDS/Inspection Jail
+Hunter-host-controlled encrypted-at-rest inspection dataset
+findings-only default inspection-retention direction
+bounded/full decrypted retention requires explicit later policy
+no default retention of TLS session secrets
+explicit inspection coverage/bypass/failure truth
+normal IDS overload does not silently backpressure production forwarding
+mTLS/pinned applications bypass unless explicitly supported
+QUIC/HTTP3 handling remains explicit rather than hidden
 ```
 
 ## Later HA Qualification
@@ -538,19 +552,56 @@ recovery-console use through vendor OOB where appropriate
 
 Stronghold does not embed a permanent vendor backdoor or replace the qualified hardware vendor's supported out-of-band management platform.
 
+## Later IDS / TLS Inspection Qualification
+
+The governing future architecture is `docs/IDS-INSPECTION.md`.
+
+**Implementation remains deferred.** Before any IDS/TLS-inspection implementation is promoted into a build phase, freeze and validate:
+
+```text
+selective inspection-policy model
+proxy implementation and supported protocols
+customer inspection-CA enrollment / recovery model
+origin-certificate validation behavior
+pinned/mTLS application bypass behavior
+QUIC/HTTP3 behavior
+FW volatile-only plaintext handling
+swap/core/debug/support plaintext-exposure controls
+purpose-specific IDS/inspection transport credential profile
+explicit peer authorization
+encrypted inspection transport framing/protocol
+HISTORY vs INSPECTION queue/resource separation
+inspection feed accounting / gap representation
+future IDS/Inspection Jail isolation
+Hunter encrypted inspection dataset / key hierarchy
+findings schema and provenance
+findings-only vs bounded-context/full-session retention classes
+independent IDS retention/hold/destruction behavior
+ruleset/engine generation identity
+inspection-coverage reporting
+normal overload/failure behavior
+any explicit MUST_INSPECT/fail-closed policy behavior
+future IPS enforcement boundary
+performance/capacity qualification
+```
+
+Stronghold FW never intentionally persists decrypted inspection payload at rest, and there is no plaintext fallback from the encrypted IDS transport.
+
+Authoritative encrypted-wire PCAP remains the packet-history authority. IDS findings are derived interpretation.
+
 ## Explicitly Deferred — VPN
 
 **VPN is shelved/deferred.**
 
 No VPN architecture, protocol set, tunnel model, key-management contract, remote-access model, or performance claim is selected now. VPN must not influence Phase 0 implementation.
 
-## Explicitly Deferred — IDS/IPS
+## Explicitly Deferred — IDS/IPS Implementation
 
-**IDS/IPS is shelved/deferred.**
+**IDS/IPS implementation is shelved/deferred.**
 
-No IDS/IPS engine, inline IPS model, detection ruleset format, TLS interception/decryption model, fail-open/fail-closed behavior, or enforcement integration is selected now.
+The future TLS/application inspection architecture is now defined at concept level in `docs/IDS-INSPECTION.md`, but no IDS/IPS engine, detection-ruleset format, complete proxy implementation, QUIC implementation, complete fail-open/fail-closed contract, or IPS enforcement mechanism is selected for implementation now.
 
-The only compatibility requirement today is that authoritative PCAP and source history remain available for future derived processing. Future detection must not require redesigning or weakening capture authority.
+The defined architecture does not pull IDS/IPS into Phase 0 and does not weaken the authoritative physical-interface capture model.
 
 ## Remaining Architecture Requiring Deliberate Freezing
 
@@ -568,9 +619,9 @@ exact Net-Hunter database/index technology and physical schemas
 exact Net-Hunter query language/API/partitioning strategy
 installation / factory provisioning / first-boot bootstrap architecture
 later dynamic-routing implementation contracts
-exact future Layer-7 boundaries
+exact future Layer-7 boundaries outside defined inspection principles
 VPN — deferred
-IDS/IPS — deferred
+IDS/IPS implementation — deferred
 ```
 
 The exact implementation phase sequence for later capabilities remains intentionally unfrozen until the architecture is sufficiently complete.
