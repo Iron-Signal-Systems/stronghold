@@ -4,7 +4,7 @@
 
 Phase 0 proves that Stronghold can continuously capture configured physical interfaces, durably preserve traffic, truthfully report loss/degradation, catalog what was observed, manage local capture storage, and hand finalized history to Net-Hunter without allowing secondary work to compromise live capture.
 
-**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, complete management-plane implementation, complete observability/alerting integrations, support/remote-engineering systems, secure-access/VPN implementation, and IDS/IPS are not part of Phase 0.**
+**Routing, firewall enforcement, HA clustering, complete journal-integrity implementation, recovery/DR, encryption/key management, production platform-trust enforcement, complete appliance-update orchestration, complete Net-Hunter records/index/search/reprocessing, complete management-plane implementation, complete observability/alerting integrations, support/remote-engineering systems, secure-access/VPN implementation, endpoint-enforcement implementation, and IDS/IPS are not part of Phase 0.**
 
 Phase 0 is grounded in the Stronghold truth model:
 
@@ -96,7 +96,7 @@ Freeze Phase 0 workload priority:
 
 Define AF_XDP RX/fill/completion ring occupancy, UMEM pressure, packet drops, CPU, memory, NVMe write latency/queue pressure, storage pressure, and transfer-backlog measurements used to throttle secondary work.
 
-Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, IDS/proxy work, secure-access work, and other later systems must obey capture-first priority.
+Future HA heartbeat, journal checkpoint signing, update work, encryption overhead, support/diagnostic work, observability collection, IDS/proxy work, secure-access work, endpoint-enforcement work, and other later systems must obey capture-first priority.
 
 ### 0.6 Single-Interface AF_XDP Capture Prototype
 
@@ -122,7 +122,7 @@ AF_XDP is the intended Phase 0 acquisition foundation. AF_PACKET/TPACKET_V3 is n
 
 Keep the XDP program minimal and measurable. Phase 0 does not turn XDP/eBPF into a second firewall or policy engine before the observation path is proven.
 
-No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, IDS/IPS, TLS/application proxying, UI, or other later system is required here.
+No routing, firewall enforcement, HA, complete journal subsystem, retention administration, complete update manager, DR, key management, complete Hunter record/index/search/reprocessing system, complete management plane, complete observability/alerting system, support/remote-engineering system, secure-access/VPN implementation, endpoint-enforcement implementation, IDS/IPS, TLS/application proxying, UI, or other later system is required here.
 
 ### 0.7 Multi-Interface / Multi-Queue AF_XDP Capture
 
@@ -240,7 +240,7 @@ Net-Hunter four-jail architecture
 active/standby FW HA
 Cluster ID + cluster-owned forwarding identity
 node-local physical capture provenance
-cluster vs node-local config
+cluster vs node local config
 session/NAT/WAN state synchronization
 heartbeat/control separated from bulk sync
 conservative promotion/fencing/split-brain prevention
@@ -330,6 +330,14 @@ Stronghold Access Agent direction
 L2TPv3 protected by IPsec for site-to-site / branch-office tunneling
 site/tunnel identity separated from tunnel reachability
 site-to-site tunnel state remains subject to normal Stronghold policy
+Windows-first Stronghold Endpoint Enforcement Agent direction
+Go service + Windows Filtering Platform endpoint PEP
+signed endpoint policy generations with lease/holdover/expiry semantics
+endpoint ALLOW/DENY separated from FW ALLOW/DENY
+user/device/application/resource-aware local enforcement
+network-side zone/VLAN context remains separate from endpoint self-assertion
+endpoint decision records correlated with FW journals/PCAP by Hunter
+deep endpoint Layer-7 inspection remains separately qualified and deferred
 ```
 
 ## Later HA Qualification
@@ -672,6 +680,43 @@ performance/PPS/throughput qualification
 
 WireGuard peer authentication never substitutes for Stronghold user/device/resource authorization. L2TPv3/IPsec tunnel establishment never substitutes for Stronghold traffic authorization.
 
+## Later Endpoint Enforcement Qualification
+
+The governing future architecture is `docs/ENDPOINT-ENFORCEMENT.md`.
+
+**Implementation remains deferred.** The initial direction is a Windows Stronghold Endpoint Agent implemented as a Go service using native Windows Filtering Platform enforcement for connection/application-aware endpoint policy.
+
+Before Endpoint Enforcement is promoted into an implementation phase, freeze and validate:
+
+```text
+supported Windows versions / editions
+Go service lifecycle and privileges
+installer/update/code-signing model
+endpoint identity/enrollment
+control-channel authentication
+signed endpoint policy bundle schema
+policy generation/rollback rules
+policy lease / holdover / expiration behavior
+Windows Filtering Platform integration/layers/filter ownership
+application/process identity semantics
+user/device identity semantics
+Stronghold zone/VLAN/network-context authority
+local-network vs remote/ZTNA operation
+Stronghold Access Session integration
+WireGuard integration where applicable
+endpoint PEP vs FW PEP dual-enforcement semantics
+endpoint decision record schema/integrity/transport
+Hunter correlation
+endpoint health/alerting
+local-administrator tamper boundary
+performance/latency/resource use
+upgrade/recovery/uninstall cleanup behavior
+```
+
+Endpoint `ALLOW` never grants permission that Stronghold FW would otherwise deny. Endpoint `DENY` is an endpoint decision and is never represented as a FW-observed denial if the traffic never reached the FW.
+
+Deep payload-aware Layer-7 enforcement is not an initial endpoint requirement. Any later local-proxy or WFP callout-driver design requires separate protocol, security, driver-signing, compatibility, crash/BSOD, performance, retention, privacy, and failure qualification.
+
 ## Explicitly Deferred — Secure Access Implementation
 
 **Zero-trust remote-access and site-to-site / branch-office secure-access implementation are shelved/deferred.**
@@ -679,6 +724,14 @@ WireGuard peer authentication never substitutes for Stronghold user/device/resou
 The future architecture is defined at concept level in `docs/SECURE-ACCESS.md`, but no production Access Agent, complete PE/PA/PEP implementation, WireGuard lifecycle implementation, posture engine, L2TPv3/IPsec implementation, interoperability profile, or complete HA/failover contract is selected for implementation now.
 
 The defined architecture does not pull secure access into Phase 0 and does not weaken the authoritative physical-interface capture model.
+
+## Explicitly Deferred — Endpoint Enforcement Implementation
+
+**Endpoint-enforcement implementation is shelved/deferred.**
+
+The future architecture is defined at concept level in `docs/ENDPOINT-ENFORCEMENT.md`, but no production Windows Endpoint Agent, WFP integration, endpoint policy-distribution service, endpoint journal/integrity system, or deep Layer-7 component is selected for implementation now.
+
+The defined architecture does not pull endpoint enforcement into Phase 0 and does not make endpoint policy a prerequisite for Stronghold FW operation.
 
 ## Explicitly Deferred — IDS/IPS Implementation
 
@@ -706,6 +759,7 @@ installation / factory provisioning / first-boot bootstrap architecture
 later dynamic-routing implementation contracts
 exact future Layer-7 boundaries outside defined inspection principles
 secure-access implementation — deferred
+endpoint-enforcement implementation — deferred
 IDS/IPS implementation — deferred
 ```
 
