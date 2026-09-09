@@ -8,7 +8,12 @@ The governing principle is:
 
 > **Stronghold has one management authority and multiple interfaces to it. CLI, API, and UI are clients of the same configuration, validation, authorization, and operational-state machinery.**
 
-No management surface owns a separate configuration truth or bypasses Stronghold configuration generation, validation, authorization, or journaling.
+No management surface owns a separate configuration truth or bypasses Stronghold configuration generation, validation, authorization, Git-backed lineage, mandatory change attribution, or journaling.
+
+Detailed governing contracts:
+
+- `docs/CONFIGURATION-GOVERNANCE.md` — Git-backed configuration lineage, mandatory change comments, least privilege, administrative authorization, approval/separation-of-duties direction, and historical troubleshooting.
+- `docs/STATEFUL-ENFORCEMENT.md` — live-session authorization, policy-generation reconciliation, rule move/remove behavior, session rebinding/termination, and post-commit runtime impact.
 
 ## One Management Authority
 
@@ -19,11 +24,14 @@ API ─────┼──► STRONGHOLD MANAGEMENT AUTHORITY
          │            │
 UI ──────┘            ├── candidate configuration
                       ├── validation
-                      ├── authorization
+                      ├── authorization / approval
                       ├── diff
-                      ├── commit
+                      ├── mandatory change comment
+                      ├── Git-backed finalization
+                      ├── generation / activation
+                      ├── runtime reconciliation
                       ├── rollback
-                      └── journals
+                      └── journals / history
 ```
 
 The management surfaces express intent. Stronghold owns appliance configuration and the platform state generated from it.
@@ -32,7 +40,7 @@ Stronghold must not create separate management paths where, for example, the CLI
 
 ## Configuration State
 
-The existing configuration model remains authoritative:
+The configuration model is:
 
 ```text
 RUNNING
@@ -43,14 +51,72 @@ VALIDATE
    ↓
 SHOW DIFF
    ↓
-COMMIT
+SAVE / COMMIT REQUEST
+   ↓
+MANDATORY CHANGE COMMENT
+   ↓
+AUTHORIZATION / REQUIRED APPROVAL
+   ↓
+GIT COMMIT
    ↓
 NEW MONOTONIC GENERATION
+   ↓
+ACTIVATE
+   ↓
+RUNTIME RECONCILIATION
 ```
 
-Rollback restores prior content by creating a new generation. History does not move backward.
+A candidate is temporary working state. Candidate editing, validation, diff, simulation, and discard do not themselves change durable Stronghold configuration.
 
-Every management surface uses the same candidate, validation, diff, commit, commit-confirmed, rollback, authorization, and journaling contracts.
+When an operator invokes the finalizing action — whatever production vocabulary is later selected, such as `save`, `write`, `commit`, or equivalent — a change comment is mandatory.
+
+```text
+no comment
+    =
+no save
+    =
+no Git commit
+    =
+no new generation
+    =
+no runtime configuration change
+```
+
+All durable configuration is Git-backed, including administratively disabled/inactive objects. A disabled rule is still configuration and therefore has versioned lineage.
+
+Rollback restores prior content by creating a new Git commit and a new Stronghold generation. History does not move backward or erase the mistaken generation.
+
+Every management surface uses the same candidate, validation, diff, mandatory-comment, authorization, Git-finalization, generation, commit-confirmed, rollback, reconciliation, and journaling contracts.
+
+## Configuration History Versus Administrative History
+
+Stronghold uses separate but correlated histories:
+
+```text
+GIT CONFIGURATION HISTORY
+    what configuration content changed
+
+STRONGHOLD ADMINISTRATIVE JOURNAL
+    who requested/authorized/activated the change
+    how the request entered Stronghold
+    why the change was made
+    whether validation/activation succeeded
+    what Stronghold did afterward
+```
+
+Each finalized Stronghold generation resolves to exact versioned configuration content.
+
+```text
+Git commit exists
+!=
+activation succeeded
+
+Git history valid
+!=
+administrative journal valid
+```
+
+Accepted configuration history is forward-moving. Normal Stronghold operation must not rewrite accepted appliance configuration history using reset/rebase/amend/force-push semantics.
 
 ## Native Platform State
 
@@ -128,6 +194,19 @@ Exact syntax is not frozen.
 
 Operational inspection should favor explanation over raw platform dumps. For example, a route inspection should be able to explain the selected prefix/source/next hop and why competing candidates were not selected.
 
+Historical troubleshooting should eventually support capabilities such as:
+
+```text
+show changes since "7 days ago"
+show changes user DOMAIN\\tech1
+show changes affecting policy P-01872
+show diff generation 819 820
+show config at 2026-09-02T12:00
+show impact generation 820
+```
+
+The exact command syntax remains implementation work; the capability to answer **what changed, who changed it, why, and what happened afterward** is the architectural requirement.
+
 ## Local Console vs Remote Management
 
 Local console and remote management are distinct trust paths.
@@ -147,6 +226,8 @@ platform validation
 
 External identity-provider failure must not permanently prevent authorized recovery from the local console.
 
+Break-glass does not become an undocumented unrestricted routine path. Exceptional operations remain attributable, reasoned, authorized according to the available recovery authority, and journaled.
+
 ### Remote management
 
 Normal remote management uses configured Stronghold authentication and authorization, including the established directions for LDAPS-only Active Directory, RADIUS, TACACS+, RBAC, and MFA where configured.
@@ -161,9 +242,79 @@ Native engineering access may exist as an exceptional support/recovery capabilit
 
 After native modification, Stronghold must validate drift/qualification rather than assuming the committed generation still describes effective platform state.
 
+## Administrative Authorization and Least Privilege
+
+Stronghold adopts the applicable security concepts from the Iron Signal Systems Domain-Neutral Platform without becoming runtime-dependent on DNP, its database, or its services.
+
+The relevant concepts include:
+
+```text
+identity is not authorization
+least privilege
+scoped authority
+exact operation/target context
+revocable authority
+step-up where required
+independent approval where required
+separation of duties where required
+attributable decisions
+fail-closed required authorization stages
+```
+
+Stronghold should not define an ordinary day-to-day account or accumulated role set that silently grants unrestricted product authority.
+
+Potential granular operation families include:
+
+```text
+policy.create / modify / move / disable / remove / activate
+object.create / modify / remove
+nat.modify
+route.modify
+interface.modify
+capture.configure / export
+ztna.policy.modify / session.revoke
+wireguard.peer.authorize
+site_tunnel.modify
+ha.configure / promote
+trust.certificate.modify / trust.root.modify
+update.activate
+recovery.execute
+history.destroy
+```
+
+Exact names and shipped roles remain implementation work.
+
+Stronghold preserves:
+
+```text
+user authenticated
+!=
+operation authorized
+
+role/group membership
+!=
+unrestricted authority
+
+permission to edit candidate
+!=
+permission to finalize change
+
+authorized to request
+!=
+authorized to approve
+
+authorized to approve
+!=
+authorized to execute
+```
+
+Missing, ambiguous, expired, revoked, superseded, incompatible, or unevaluated required authority fails closed.
+
+High-impact operations may require step-up MFA, independent approval, or separation of duties. Examples include trust-root/signing-authority changes, disabling/degrading capture protection, altering journal-integrity controls, weakening HA fencing, forced promotion, management-plane exposure changes, privileged recovery, destructive history operations, and any future hardware-bypass mode.
+
 ## API
 
-The API exposes the same management contract as CLI/future UI. It does not receive a special bypass around validation or authorization.
+The API exposes the same management contract as CLI/future UI. It does not receive a special bypass around validation, authorization, mandatory change comments, Git-backed finalization, generation assignment, or reconciliation.
 
 Conceptual operations include:
 
@@ -173,13 +324,15 @@ read operational state
 create/edit candidate
 validate candidate
 show candidate diff
-commit candidate
+finalize candidate with mandatory change reason
 rollback generation
 read journals/history
 read capture/Hunter/HA/storage/system state
 ```
 
-RBAC remains granular. Permission to edit a candidate does not imply permission to commit it.
+RBAC remains granular. Permission to edit a candidate does not imply permission to finalize it.
+
+Automation-originated durable changes require the same attributable reason/comment semantics as human changes. The reason may be supplied programmatically but remains mandatory and recorded.
 
 ## API and Object Identity
 
@@ -198,7 +351,7 @@ Appliance ID
 Cluster ID
 ```
 
-Renaming an object must not destroy historical correlation or silently break automation that uses stable identity.
+Renaming or moving an object must not destroy historical correlation or silently break automation that uses stable identity.
 
 API version, configuration schema version, Stronghold software version, journal schema version, and HA protocol/state format are separate compatibility dimensions.
 
@@ -219,7 +372,9 @@ FW MANAGEMENT UI
         ↓
 Stronghold management API/authority
         ↓
-candidate → validate → diff → commit
+candidate → validate → diff → mandatory comment
+        ↓
+authorize → Git commit → generation → activate → reconcile
 ```
 
 The UI must not contain a separate privileged configuration backend.
@@ -283,7 +438,7 @@ Admin A candidate based on 412
 Admin B candidate based on 412
 ```
 
-If Admin A commits generation 413, Admin B's candidate becomes stale and must be reconciled/rebased before commit.
+If Admin A finalizes generation 413, Admin B's candidate becomes stale and must be reconciled/rebased before finalization.
 
 ```text
 candidate valid against generation 412
@@ -300,17 +455,68 @@ Configuration-changing operations preserve the responsible actor and management 
 ```text
 user/service identity
 authentication source
-role/permissions
+device/session identity where applicable
+authority/grant used where applicable
+approval identity/request where applicable
 source address
 management interface
 surface: console / CLI / API / UI
 operation ID
 candidate base generation
+Git commit ID
+previous generation
 resulting generation
-result
+mandatory change comment
+validation result
+activation result
+runtime reconciliation result
 ```
 
 A management surface does not become a different authority merely because its origin is recorded.
+
+## Historical Administrator Review
+
+Authorized senior administrators/auditors should be able to filter configuration and privileged administrative history by actor, time range, stable object, management surface, and operation class.
+
+Potential capabilities include:
+
+```text
+changes by actor
+privileged actions by actor
+denied administrative actions by actor
+authority exercised by actor
+approvals by actor
+changes affecting a Policy ID / VLAN / route / object
+changes within a selected time range
+```
+
+This is a troubleshooting and accountability capability, not an assumption that the selected technician made an error.
+
+## Post-Commit Impact
+
+Policy-affecting changes should correlate configuration history with runtime and packet-history consequences.
+
+Conceptually:
+
+```text
+ADMINISTRATOR / COMMENT
+        ↓
+GIT DIFF
+        ↓
+STRONGHOLD GENERATION
+        ↓
+POLICY / SESSION RECONCILIATION
+        ↓
+NEW ALLOW / DENY DECISIONS
+        ↓
+AUTHORITATIVE PACKET HISTORY
+```
+
+This enables an operator to discover an unintended rule movement/removal quickly rather than waiting hours for a previously established client session to close and expose the problem.
+
+`docs/STATEFUL-ENFORCEMENT.md` governs the detailed live-session behavior.
+
+Post-commit impact reporting is observation/explanation. Stronghold must not automatically declare a syntactically valid change to be correct or incorrect merely because traffic patterns changed.
 
 ## Service Identities
 
@@ -322,7 +528,7 @@ SERVICE IDENTITY
 APPLIANCE IDENTITY
 ```
 
-Automation uses scoped service identities rather than shared human credentials. Credential rotation and RBAC apply to service identities independently.
+Automation uses scoped service identities rather than shared human credentials. Credential rotation and least-privilege authorization apply to service identities independently.
 
 ## Secret Handling
 
@@ -364,22 +570,36 @@ Dangerous verbs such as destruction, revocation, key recovery, rollback, restore
 
 > **CLI, API, and any future FW management UI are interfaces to one Stronghold management authority.**
 
+> **No durable Stronghold configuration change exists without an attributable operator-supplied reason.**
+
+> **Every active Stronghold configuration generation references exact versioned configuration content.**
+
+> **Authentication establishes identity; it does not grant unrestricted administrative authority.**
+
 > **Native Linux/FreeBSD state is implementation state beneath Stronghold, not a competing supported configuration interface.**
 
 > **Configuration state, operational state, and historical state remain distinct.**
 
 > **Net-Hunter investigation access does not grant firewall configuration authority.**
 
-> **Authentication, authorization, secret handling, validation, generation, and journaling apply consistently regardless of management surface.**
+> **Authentication, authorization, secret handling, validation, Git lineage, generation, reconciliation, and journaling apply consistently regardless of management surface.**
 
 ## Truth Separations
 
 ```text
 CLI configuration                 != separate configuration authority
 native OS change                  != Stronghold commit
+candidate edited                  != durable configuration changed
 configured state                  != operational state
 operational state                 != historical state
-API access                        != commit permission
+API access                        != finalization permission
+user authenticated                != operation authorized
+role/group membership             != unrestricted authority
+comment supplied                  != operation authorized
+Git commit created                != activation succeeded
+configuration activated           != reconciliation complete
+Git history valid                 != administrative journal valid
+rollback                          != history deletion
 same identity provider            != same active session
 Hunter UI access                  != FW administration authority
 diagnostic action                 != repair action
@@ -389,4 +609,4 @@ secret configured                 != secret readable
 
 ## Scope
 
-This document defines architecture only. It does not pull a complete CLI, API, FW web UI, management service, remote authentication implementation, or management concurrency system into Phase 0.
+This document defines architecture only. It does not pull a complete CLI, API, FW web UI, Git implementation, authorization/approval service, management concurrency system, historical-query engine, or post-commit impact UI into Phase 0.
