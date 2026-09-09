@@ -14,6 +14,7 @@ Detailed governing contracts:
 
 - `docs/CONFIGURATION-GOVERNANCE.md` — Git-backed configuration lineage, mandatory change comments, least privilege, administrative authorization, approval/separation-of-duties direction, and historical troubleshooting.
 - `docs/STATEFUL-ENFORCEMENT.md` — live-session authorization, policy-generation reconciliation, rule move/remove behavior, session rebinding/termination, and post-commit runtime impact.
+- `docs/POLICY-SIMULATION.md` — non-mutating Dry Run/counterfactual testing, candidate impact estimation, IPv4/IPv6 and FQDN family-aware simulation, session/route/NAT/WAN impact prediction, and expected-versus-actual comparison.
 
 ## One Management Authority
 
@@ -24,12 +25,15 @@ API ─────┼──► STRONGHOLD MANAGEMENT AUTHORITY
          │            │
 UI ──────┘            ├── candidate configuration
                       ├── validation
-                      ├── authorization / approval
                       ├── diff
+                      ├── Dry Run / simulation
+                      ├── expected-impact review
+                      ├── authorization / approval
                       ├── mandatory change comment
                       ├── Git-backed finalization
                       ├── generation / activation
                       ├── runtime reconciliation
+                      ├── post-commit impact
                       ├── rollback
                       └── journals / history
 ```
@@ -51,6 +55,10 @@ VALIDATE
    ↓
 SHOW DIFF
    ↓
+DRY RUN / SIMULATE
+   ↓
+REVIEW EXPECTED IMPACT
+   ↓
 SAVE / COMMIT REQUEST
    ↓
 MANDATORY CHANGE COMMENT
@@ -64,9 +72,21 @@ NEW MONOTONIC GENERATION
 ACTIVATE
    ↓
 RUNTIME RECONCILIATION
+   ↓
+POST-COMMIT OBSERVATION
 ```
 
 A candidate is temporary working state. Candidate editing, validation, diff, simulation, and discard do not themselves change durable Stronghold configuration.
+
+Dry Run is a non-mutating management operation governed by `docs/POLICY-SIMULATION.md`. It may evaluate a candidate against hypothetical flows, current sessions, policy ordering, object dependencies, routing, NAT, WAN behavior, FQDN resolution, and other supported facts without making the candidate authoritative or changing production runtime state.
+
+A simulation does not require a configuration-change comment merely to run because it is not a durable configuration change. Simulation remains separately authorized because its output may expose sensitive network, policy, route, DNS, and session information.
+
+```text
+simulation authorized
+!=
+configuration finalization authorized
+```
 
 When an operator invokes the finalizing action — whatever production vocabulary is later selected, such as `save`, `write`, `commit`, or equivalent — a change comment is mandatory.
 
@@ -86,7 +106,7 @@ All durable configuration is Git-backed, including administratively disabled/ina
 
 Rollback restores prior content by creating a new Git commit and a new Stronghold generation. History does not move backward or erase the mistaken generation.
 
-Every management surface uses the same candidate, validation, diff, mandatory-comment, authorization, Git-finalization, generation, commit-confirmed, rollback, reconciliation, and journaling contracts.
+Every management surface uses the same candidate, validation, diff, Dry Run/simulation, mandatory-comment, authorization, Git-finalization, generation, commit-confirmed, rollback, reconciliation, post-commit impact, and journaling contracts.
 
 ## Configuration History Versus Administrative History
 
@@ -183,6 +203,7 @@ commit
 rollback
 diagnose
 test
+simulate
 repair
 journal
 history
@@ -193,6 +214,20 @@ ha
 Exact syntax is not frozen.
 
 Operational inspection should favor explanation over raw platform dumps. For example, a route inspection should be able to explain the selected prefix/source/next hop and why competing candidates were not selected.
+
+Dry Run/policy simulation should eventually support capabilities such as:
+
+```text
+test policy source HR-PC-17 destination payroll.vendor.com service HTTPS
+simulate candidate against current sessions
+simulate policy P-01872
+simulate route changes
+simulate NAT changes
+show simulation terminated
+show simulation restart-required
+```
+
+The exact syntax remains implementation work. Simulation output is prediction and must use vocabulary such as `EXPECTED RESULT`, `ESTIMATED IMPACT`, `WOULD ALLOW`, `WOULD DENY`, `WOULD REBIND`, `WOULD RESTART`, and `WOULD TERMINATE` rather than pretending the predicted packet or session event actually occurred.
 
 Historical troubleshooting should eventually support capabilities such as:
 
@@ -267,6 +302,7 @@ Potential granular operation families include:
 
 ```text
 policy.create / modify / move / disable / remove / activate
+policy.simulate
 object.create / modify / remove
 nat.modify
 route.modify
@@ -299,6 +335,10 @@ permission to edit candidate
 !=
 permission to finalize change
 
+permission to simulate candidate
+!=
+permission to activate candidate
+
 authorized to request
 !=
 authorized to approve
@@ -324,13 +364,15 @@ read operational state
 create/edit candidate
 validate candidate
 show candidate diff
+run non-mutating policy/candidate simulation
+read simulation result / expected impact
 finalize candidate with mandatory change reason
 rollback generation
 read journals/history
 read capture/Hunter/HA/storage/system state
 ```
 
-RBAC remains granular. Permission to edit a candidate does not imply permission to finalize it.
+RBAC remains granular. Permission to edit a candidate does not imply permission to finalize it. Permission to run a Dry Run does not imply permission to activate the candidate.
 
 Automation-originated durable changes require the same attributable reason/comment semantics as human changes. The reason may be supplied programmatically but remains mandatory and recorded.
 
@@ -372,12 +414,16 @@ FW MANAGEMENT UI
         ↓
 Stronghold management API/authority
         ↓
-candidate → validate → diff → mandatory comment
+candidate → validate → diff → Dry Run / expected impact
         ↓
-authorize → Git commit → generation → activate → reconcile
+mandatory comment → authorize → Git commit
+        ↓
+generation → activate → reconcile → post-commit impact
 ```
 
 The UI must not contain a separate privileged configuration backend.
+
+A future UI may provide a prominent Dry Run action before activation, but it must not quietly convert Dry Run into a configuration commit or production dataplane test.
 
 ## Net-Hunter External UI Boundary
 
@@ -446,6 +492,16 @@ candidate valid against generation 412
 candidate valid against current generation 413
 ```
 
+A simulation is also bound to the candidate/base context used to produce it. A prior Dry Run must be marked stale where Stronghold can establish that the candidate, base generation, or material dependent state changed.
+
+```text
+simulation against generation 412
+!=
+simulation current after generation 413 becomes authoritative
+```
+
+A successful simulation never becomes an authorization token for stale candidate activation.
+
 Exact concurrency mechanics remain implementation work.
 
 ## Administrative Attribution
@@ -474,6 +530,8 @@ runtime reconciliation result
 
 A management surface does not become a different authority merely because its origin is recorded.
 
+Non-mutating simulations are also attributable management operations. Their records should preserve a Simulation ID, actor/service identity, candidate/base identity, simulation class, request context, and result status without pretending a configuration generation was created.
+
 ## Historical Administrator Review
 
 Authorized senior administrators/auditors should be able to filter configuration and privileged administrative history by actor, time range, stable object, management surface, and operation class.
@@ -486,11 +544,32 @@ privileged actions by actor
 denied administrative actions by actor
 authority exercised by actor
 approvals by actor
+simulations by actor
 changes affecting a Policy ID / VLAN / route / object
 changes within a selected time range
 ```
 
 This is a troubleshooting and accountability capability, not an assumption that the selected technician made an error.
+
+## Pre-Commit Dry Run and Expected Impact
+
+Before durable finalization, Stronghold should allow an authorized operator to evaluate likely candidate effects without altering production.
+
+The detailed contract is governed by `docs/POLICY-SIMULATION.md`.
+
+Potential capabilities include:
+
+```text
+single-flow policy evaluation
+candidate against current sessions
+rule move/removal impact
+referenced-object impact
+route/NAT/WAN impact
+IPv4/IPv6 family-aware FQDN evaluation
+future secure-access request simulation
+```
+
+Dry Run must not terminate sessions, create production state, program nftables/routes/NAT/WireGuard, change HA state, increment production counters, or otherwise alter production behavior.
 
 ## Post-Commit Impact
 
@@ -503,6 +582,8 @@ ADMINISTRATOR / COMMENT
         ↓
 GIT DIFF
         ↓
+PRE-COMMIT EXPECTED IMPACT
+        ↓
 STRONGHOLD GENERATION
         ↓
 POLICY / SESSION RECONCILIATION
@@ -510,13 +591,30 @@ POLICY / SESSION RECONCILIATION
 NEW ALLOW / DENY DECISIONS
         ↓
 AUTHORITATIVE PACKET HISTORY
+        ↓
+EXPECTED vs ACTUAL COMPARISON
 ```
 
 This enables an operator to discover an unintended rule movement/removal quickly rather than waiting hours for a previously established client session to close and expose the problem.
 
-`docs/STATEFUL-ENFORCEMENT.md` governs the detailed live-session behavior.
+`docs/STATEFUL-ENFORCEMENT.md` governs the detailed live-session behavior. `docs/POLICY-SIMULATION.md` governs pre-commit prediction and expected-versus-actual comparison.
 
 Post-commit impact reporting is observation/explanation. Stronghold must not automatically declare a syntactically valid change to be correct or incorrect merely because traffic patterns changed.
+
+A particularly important warning is when observed behavior materially differs from the Dry Run estimate:
+
+```text
+SIMULATION EXPECTED:
+    0 new denies
+
+ACTUAL SINCE COMMIT:
+    38 newly denied flows
+
+ATTENTION:
+    observed impact differs from simulation
+```
+
+This does not automatically roll back or declare the change wrong. It gives the operator immediate, attributable information while the change context is still fresh.
 
 ## Service Identities
 
@@ -555,20 +653,22 @@ SHOW
 DIAGNOSE
     inspect/correlate without intended modification
 
-TEST
-    actively exercise a path/service
+TEST / SIMULATE
+    evaluate or actively exercise only according to the documented command contract
 
 REPAIR
     intentionally modify state
 ```
 
-A diagnostic command must not quietly perform undocumented repair.
+Dry Run/simulation commands governed by `docs/POLICY-SIMULATION.md` are non-mutating. A diagnostic or simulation command must not quietly perform undocumented repair or production configuration.
 
 Dangerous verbs such as destruction, revocation, key recovery, rollback, restore, failover, and update remain explicit and separately authorized.
 
 ## Management Invariants
 
 > **CLI, API, and any future FW management UI are interfaces to one Stronghold management authority.**
+
+> **Dry Run is predictive and non-mutating; activation remains the authority that changes Stronghold behavior.**
 
 > **No durable Stronghold configuration change exists without an attributable operator-supplied reason.**
 
@@ -582,7 +682,7 @@ Dangerous verbs such as destruction, revocation, key recovery, rollback, restore
 
 > **Net-Hunter investigation access does not grant firewall configuration authority.**
 
-> **Authentication, authorization, secret handling, validation, Git lineage, generation, reconciliation, and journaling apply consistently regardless of management surface.**
+> **Authentication, authorization, secret handling, validation, simulation, Git lineage, generation, reconciliation, and journaling apply consistently regardless of management surface.**
 
 ## Truth Separations
 
@@ -590,6 +690,11 @@ Dangerous verbs such as destruction, revocation, key recovery, rollback, restore
 CLI configuration                 != separate configuration authority
 native OS change                  != Stronghold commit
 candidate edited                  != durable configuration changed
+simulation performed              != configuration changed
+simulation authorized             != activation authorized
+simulation predicts ALLOW         != packet actually allowed
+simulation match                  != production policy hit
+candidate impact estimate         != post-commit observed impact
 configured state                  != operational state
 operational state                 != historical state
 API access                        != finalization permission
@@ -609,4 +714,4 @@ secret configured                 != secret readable
 
 ## Scope
 
-This document defines architecture only. It does not pull a complete CLI, API, FW web UI, Git implementation, authorization/approval service, management concurrency system, historical-query engine, or post-commit impact UI into Phase 0.
+This document defines architecture only. It does not pull a complete CLI, API, FW web UI, Git implementation, authorization/approval service, policy simulator, management concurrency system, historical-query engine, or post-commit impact UI into Phase 0.
