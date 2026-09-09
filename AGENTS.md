@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace `docs/ARCHITECTURE.md` or `docs/ROADMAP.md`.
+This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace `docs/ARCHITECTURE.md`, `docs/NET-HUNTER-RECORDS.md`, or `docs/ROADMAP.md`.
 
 ## Governing Principles
 
@@ -21,6 +21,8 @@ This file defines how contributors, coding agents, and automation work within th
 > **High availability of forwarding does not imply uninterrupted packet-history continuity.**
 
 > **Record what the system can actually establish, preserve the source of that truth, and never manufacture certainty beyond it.**
+
+> **An incomplete index is not complete history.**
 
 ## Product Model
 
@@ -176,6 +178,16 @@ link speed                      != validated dataplane rate
 capture throughput              != full-feature firewall throughput
 node performance                != HA cluster performance
 storage capacity                != sustainable ingest capacity
+database record                 != authoritative packet
+no indexed result               != no traffic
+index unavailable               != history unavailable
+source history available        != index complete
+reprocessing result             != original knowledge
+timeline                        != authoritative journal
+exported PCAP                   != original PCAP segment
+current hostname association    != historical hostname association
+direct observation              != correlated association
+processing failed               != source history lost
 ```
 
 ## Failure-State Discipline
@@ -196,6 +208,8 @@ mismatch
 failed
 recovery_required
 continuity_gap
+processing_pending
+index_incomplete
 ```
 
 Do not infer success from absence of error. A later successful retry does not erase a failed operation.
@@ -382,6 +396,85 @@ External UI authoritative access is read-only. Writable UI state is non-authorit
 
 Derived indexes may be rebuilt/reprocessed but MUST NOT rewrite authoritative PCAP/source journals.
 
+### Net-Hunter records/search authority
+
+`docs/NET-HUNTER-RECORDS.md` defines the governing record/search/reprocessing architecture.
+
+Preserve two distinct catalog concerns:
+
+```text
+SEGMENT CATALOG
+    where are the packets?
+
+TRAFFIC / RECORD CATALOG
+    what happened?
+```
+
+Do not make row-per-packet database storage a mandatory primary search model without measurement and explicit approval.
+
+Every material traffic-derived fact must preserve source provenance sufficient to identify its authoritative source appliance/history object and processing/decoder lineage.
+
+Historical MAC/IP/name/VLAN/control-plane relationships are time-bounded facts. Do not overwrite old relationships with current values.
+
+Direct observation and correlated association must remain distinguishable.
+
+Unknown, unsupported, malformed, partially parsed, and decoder-error traffic must remain discoverable where lower-level observation metadata permits.
+
+### Search completeness
+
+> **Stronghold must never present an incomplete index as complete history.**
+
+A query over incomplete/rebuilding derived state must expose coverage or incompleteness rather than returning an unqualified `no results` conclusion.
+
+Preserve distinctions such as:
+
+```text
+not observed
+not captured
+captured but not processed
+processed but not decoded
+decoded but not indexed
+indexed and no result
+history destroyed
+history unavailable
+```
+
+When indexes are incomplete/unavailable, retain the ability to fall back toward the segment catalog and candidate authoritative PCAP rather than treating the system as historically blind.
+
+### Reprocessing
+
+Reprocessing creates new/superseding derived interpretation and MUST NOT alter source PCAP/journals or imply that later understanding was known at original observation time.
+
+Preserve decoder/correlator identity, processing time/generation, source object lineage, and supersession state where applicable.
+
+For significant reprocessing/schema changes, prefer building/validating a new derived generation before switching the default query generation rather than leaving a partially migrated live search state.
+
+Targeted and full reprocessing operations are Hunter Processing Journal events.
+
+### Processing boundaries and backlog
+
+Record Processing Jail may read authoritative PCAP/source journals and write derived records/indexes, but MUST NOT rewrite authoritative history.
+
+Distinguish:
+
+```text
+TRANSFER BACKLOG
+INGEST BACKLOG
+PROCESSING BACKLOG
+REPROCESSING BACKLOG
+INDEX REBUILD BACKLOG
+```
+
+Current receive/verify/durable commit work outranks historical reprocessing.
+
+### PCAP pivot and export
+
+Where source PCAP remains retained, traffic-derived results must preserve enough lineage to locate the applicable source segment(s).
+
+A hunt-created PCAP export is a derived extract with export provenance; it is not the original authoritative segment even if its packet bytes are exact copies.
+
+Historical decision correlation must use the configuration generation active at decision time, not today's policy merely because the Policy ID is unchanged.
+
 ## Resource Priority
 
 FW priority intent:
@@ -414,9 +507,11 @@ Nothing built now should prevent future detection from reading authoritative PCA
 
 Implementation begins with FW Phase 0 Traffic Observation Foundation.
 
-Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
+Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, VPN, IDS/IPS, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
 Phase 0 may establish reproducible capture/hardware baselines useful to later qualification without implementing those later systems early.
+
+Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
 ## Repository Operations
 
@@ -430,10 +525,12 @@ Read-only inspection and local/offline work are permitted unless restricted. One
 
 Important failure paths should preserve enough state/history to answer what was observed, known, unknown, decided, actually performed, `NOT_PERFORMED`, failed, lost, and still recoverable.
 
+For Hunter search, the same test includes whether a `no results` answer came from complete history/index coverage or merely from incomplete processing/decoding/indexing.
+
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, and repository-write boundaries above remain intact.
+Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, and repository-write boundaries above remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, Net-Hunter provenance/search/reprocessing, UI read-only, configuration-backup, or repository-write requirements.
