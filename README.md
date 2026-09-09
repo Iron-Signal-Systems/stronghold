@@ -90,6 +90,8 @@ link speed                      != validated dataplane rate
 capture throughput              != full-feature firewall throughput
 node performance                != HA cluster performance
 storage capacity                != sustainable ingest capacity
+AF_XDP available                != AF_XDP zero-copy available
+zero-copy available             != Stronghold zero-copy qualified
 ```
 
 ## Capture Requirement #1 — Wireshark-Class Interface Visibility
@@ -102,6 +104,8 @@ Protocol recognition is not required before capture. Observable IPv4/IPv6, ARP, 
 
 Stronghold does not claim visibility into traffic that topology, NIC hardware, filtering/offload behavior, or the driver never presents.
 
+Stronghold FW uses **AF_XDP as the intended packet-acquisition foundation**. AF_XDP is subordinate to the capture invariant: the selected XDP/AF_XDP mode, queue/RSS behavior, UMEM/ring design, NIC/driver/firmware behavior, and CPU/NUMA/PCIe placement must be qualified rather than assumed. See [`docs/AF-XDP.md`](docs/AF-XDP.md).
+
 ## Stronghold FW
 
 Current platform direction:
@@ -110,7 +114,7 @@ Current platform direction:
 Arch Linux / x86_64
 CLI-first appliance
 physical qualified PCIe Ethernet NICs
-AF_PACKET / TPACKET_V3 initial capture path
+AF_XDP packet-acquisition foundation
 continuous PCAPNG
 nftables enforcement foundation
 Btrfs OS storage
@@ -288,13 +292,13 @@ Development hardware, qualification hardware, and supported production hardware 
 
 Stronghold support/performance claims apply to **qualified appliance profiles**, not arbitrary systems capable of booting the software.
 
-Qualification binds Stronghold release, CPU, NIC/driver/firmware, PCIe topology, NUMA behavior where applicable, RAM, storage, platform trust, and enabled feature set.
+Qualification binds Stronghold release, CPU, NIC/driver/firmware, PCIe topology, NUMA behavior where applicable, RAM, storage, platform trust, enabled feature set, and the qualified XDP/AF_XDP operating mode.
 
-NIC qualification covers capture-visible behavior including multi-queue/RSS, VLAN/checksum/offload representation, filtering/promiscuous behavior, ring/drop behavior, MTU, driver resets, and firmware revision.
+NIC qualification covers capture-visible behavior including multi-queue/RSS, AF_XDP queue binding, UMEM/ring behavior, copy/zero-copy mode, VLAN/checksum/offload representation, filtering/promiscuous behavior, ring/drop behavior, MTU, driver resets, and firmware revision.
 
 Performance qualification measures both bandwidth and packet rate across representative packet sizes and traffic profiles. Capture-only throughput is not used as a claim for full stateful/NAT/HA feature sets.
 
-FW qualification includes sustained capture/write behavior and truthful NIC/kernel/writer/intentional-policy drop accounting. HA qualification measures node-pair behavior, fencing/promotion, session/state continuity, virtual identity convergence, forwarding interruption, capture gap, and journal truthfulness separately.
+FW qualification includes sustained capture/write behavior and truthful NIC/XDP/AF_XDP/user-space/writer/intentional-policy drop accounting. HA qualification measures node-pair behavior, fencing/promotion, session/state continuity, virtual identity convergence, forwarding interruption, capture gap, and journal truthfulness separately.
 
 Net-Hunter qualification separates capacity from sustainable ingest, verification, indexing, query, reprocessing, retention, scrub/resilver, and degraded-storage behavior. ECC remains the required direction for Net-Hunter and a strong production preference for FW until exact supported profiles are frozen.
 
@@ -371,7 +375,7 @@ Holds override ordinary expiration. Manual destruction is privileged and attribu
 
 ## Current Scope and Explicit Deferrals
 
-Implementation begins with the Stronghold FW **Phase 0 Traffic Observation Foundation**. Routing, firewall enforcement, HA, complete journal integrity, recovery/DR, encryption/key management, production platform trust, and complete appliance update orchestration are later implementation work even though their architectural direction is documented now.
+Implementation begins with the Stronghold FW **Phase 0 Traffic Observation Foundation**. AF_XDP is the Phase 0 packet-acquisition foundation. Routing, firewall enforcement, HA, complete journal integrity, recovery/DR, encryption/key management, production platform trust, and complete appliance update orchestration are later implementation work even though their architectural direction is documented now.
 
 **VPN is explicitly deferred. IDS/IPS is explicitly deferred.** Neither is part of Phase 0, an early performance claim, or a dependency of the current capture architecture. Nothing built now should prevent future detection from consuming authoritative PCAP and producing derived results, but no IDS/IPS engine, inline behavior, TLS interception, ruleset model, or IPS enforcement contract is being selected now.
 
@@ -385,7 +389,7 @@ If it cannot, the feature is not complete.
 
 Stronghold follows the Iron Signal Systems Engineering Standards pinned by `ENGINEERING-STANDARD`. Contributor behavior is governed by `AGENTS.md` and nested `AGENTS.md` files.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/AF-XDP.md`](docs/AF-XDP.md), and [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Project Status
 
