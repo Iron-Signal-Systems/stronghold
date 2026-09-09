@@ -5,6 +5,7 @@
 This file defines how contributors, coding agents, and automation work within the Stronghold repository. It is a behavioral contract and does not replace the governing architecture/roadmap documents:
 
 - `docs/ARCHITECTURE.md`
+- `docs/AF-XDP.md`
 - `docs/NET-HUNTER-RECORDS.md`
 - `docs/MANAGEMENT-PLANE.md`
 - `docs/OBSERVABILITY.md`
@@ -15,6 +16,8 @@ This file defines how contributors, coding agents, and automation work within th
 ## Governing Principles
 
 > **Capture first. Never sacrifice observation for secondary work.**
+
+> **AF_XDP is the intended Stronghold FW packet-acquisition foundation.**
 
 > **Denied traffic should be cheap to reject, but never invisible.**
 
@@ -111,7 +114,11 @@ Unknown EtherTypes, unknown IP protocols, malformed/vendor-specific traffic, and
 
 RAM is buffering only, not durable capture.
 
-Initial acquisition direction is AF_PACKET/TPACKET_V3 unless later measured/approved contracts justify another path.
+`docs/AF-XDP.md` defines the governing packet-acquisition architecture. **AF_XDP is the Phase 0 capture foundation.** AF_PACKET/TPACKET_V3 is not the planned primary Phase 0 implementation and must not be introduced as a silent fallback that preserves an AF_XDP qualification claim.
+
+AF_XDP availability, native-driver operation, zero-copy capability, and Stronghold qualification are separate facts. Queue/RSS topology, UMEM/rings, worker affinity, CPU/NUMA/PCIe locality, NIC/driver/firmware behavior, offload representation, and drop accounting must be measured and exposed truthfully.
+
+Keep the Phase 0 XDP program minimal and measurable. XDP/eBPF does not become a second policy/enforcement engine before the authoritative capture path is proven.
 
 Live packet acquisition and durable PCAP writes outrank transfer, compression, indexing, analytics, support collection, debug work, future IDS/proxy work, and other secondary activity.
 
@@ -206,6 +213,10 @@ link speed                         != validated dataplane rate
 capture throughput                 != full-feature firewall throughput
 node performance                   != HA cluster performance
 storage capacity                   != sustainable ingest capacity
+AF_XDP available                   != AF_XDP zero-copy available
+AF_XDP zero-copy available         != Stronghold zero-copy qualified
+queue configured                   != queue serviced adequately
+worker running                     != AF_XDP ring healthy
 database record                    != authoritative packet
 no indexed result                  != no traffic
 index unavailable                  != history unavailable
@@ -442,11 +453,11 @@ Stronghold claims apply to qualified appliance profiles, not arbitrary hardware 
 
 Preserve distinctions between `DETECTED`, `COMPATIBLE`, `QUALIFIED`, and `SUPPORTED`.
 
-Qualification binds release, CPU, NIC/driver/firmware, PCIe/NUMA topology, RAM/ECC, storage, platform trust, and enabled feature set.
+Qualification binds release, CPU, NIC/driver/firmware, PCIe/NUMA topology, RAM/ECC, storage, platform trust, enabled feature set, and XDP/AF_XDP operating mode.
 
-NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, VLAN/offload representation, filtering/promiscuous behavior, ring/drop behavior, MTU, timestamps, reset behavior, and firmware.
+NIC qualification must cover visibility-affecting behavior: RSS/multi-queue, AF_XDP queue binding, UMEM/ring behavior, copy/zero-copy mode, VLAN/offload representation, filtering/promiscuous behavior, ring/drop behavior, MTU, timestamps, reset behavior, and firmware.
 
-Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, and truthful loss accounting.
+Performance testing must include bandwidth **and** PPS, multiple packet sizes, sustained duration, traffic mix, flow/session behavior, 64-byte packet stress, and truthful loss accounting.
 
 Capture-only throughput is not a claim for full-feature stateful/NAT/HA or future TLS-inspection operation.
 
@@ -628,7 +639,7 @@ Deep Hunter analysis is not a per-packet synchronous forwarding oracle.
 FW priority intent:
 
 ```text
-1. packet acquisition
+1. AF_XDP packet acquisition / ring service
 2. active PCAP writes
 3. segment finalization / minimum integrity
 4. essential observation/decision/journal append
@@ -655,11 +666,11 @@ Nothing built now should weaken authoritative PCAP capture or make detection a c
 
 ## Scope Discipline
 
-Implementation begins with FW Phase 0 Traffic Observation Foundation.
+Implementation begins with FW Phase 0 Traffic Observation Foundation using AF_XDP as the packet-acquisition foundation.
 
 Do not pull bridging/routing/enforcement, full journals, retention administration, HA, complete update manager, recovery/DR, encryption/key management, platform trust enforcement, complete Net-Hunter records/index/search/reprocessing, complete management plane, complete observability/alerting system, support/remote-engineering system, VPN, IDS/IPS, TLS/application proxying, UI, Hunter processing, dynamic routing, VRF, or other future systems into Phase 0 without explicit approval.
 
-Phase 0 may establish reproducible capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/IDS systems early.
+Phase 0 may establish reproducible AF_XDP capture/hardware baselines and basic measurements required to prove capture correctness without implementing later management/observability/support/IDS systems early.
 
 Phase 0 segment/traffic catalogs must remain compatible with later Net-Hunter authority/provenance/search coverage requirements without implementing the complete later system.
 
@@ -675,6 +686,8 @@ Read-only inspection and local/offline work are permitted unless restricted. One
 
 Important failure paths should preserve enough state/history to answer what was observed, known, unknown, decided, actually performed, `NOT_PERFORMED`, failed, lost, and still recoverable.
 
+For AF_XDP capture, the same test includes the active XDP/AF_XDP mode, queue/socket/worker state, ring pressure/starvation, relevant drop counters, and whether an observation gap exists.
+
 For Hunter search, the same test includes whether a `no results` answer came from complete history/index coverage or merely incomplete processing/decoding/indexing.
 
 For management/health/support work, the same test includes whether the operator can distinguish intended configuration from runtime state, determine which responsibility is degraded, and identify what diagnostic/support action changed or did not change appliance state.
@@ -683,8 +696,8 @@ For future IDS/inspection, the same test includes whether traffic was selected, 
 
 ## Review Expectations
 
-Before proposing a change as complete, verify that applicable capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, and repository-write boundaries remain intact.
+Before proposing a change as complete, verify that applicable AF_XDP/capture, authority, routing/NAT/WAN, identity, time, journal, retention, HA, update, DR, crypto, platform-trust, hardware-qualification, Hunter-isolation, Net-Hunter provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, and repository-write boundaries remain intact.
 
 ## Nested AGENTS.md Files
 
-Nested files may refine subtree requirements but must not silently weaken repository-wide capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
+Nested files may refine subtree requirements but must not silently weaken repository-wide AF_XDP/capture, durability, integrity, truthfulness, authorization, identity/trust, time, journals, retention, HA, update, recovery, encryption, platform-trust, qualification, Net-Hunter isolation, provenance/search/reprocessing, management-plane, observability, support/vendor-OOB, future IDS/inspection, UI read-only, configuration-backup, or repository-write requirements.
