@@ -10,7 +10,9 @@ Stronghold Agent is not an EDR, not a replacement enterprise identity provider, 
 
 Its governing role is:
 
-> **Establish endpoint-origin facts, enforce authorized Stronghold policy locally, protect selected traffic before it crosses an untrusted network, and report what the endpoint actually decided and performed.**
+> **Establish endpoint-origin facts, enforce the endpoint-applicable projection of finalized Stronghold policy locally, protect selected traffic before it crosses an untrusted network, and report what the endpoint actually decided and performed.**
+
+The cross-component policy synchronization and early-enforcement contract is governed by `docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`.
 
 ## Component Boundary
 
@@ -156,6 +158,27 @@ FW denied packet
 
 Stronghold must not fabricate a Stronghold FW observation when no packet was presented to the FW.
 
+Where the Agent can definitively enforce a DENY from its active policy projection, it should not intentionally transmit the connection merely so Stronghold FW can reject it again.
+
+Conceptually:
+
+```text
+Policy 798
+Generation 844
+powershell.exe -> PAYROLL-DB TCP/1433 -> DENY
+
+process attempts connection
+        |
+        v
+Stronghold Agent
+        |
+        +---- endpoint decision record
+        |
+        +---- packet transmitted: NO
+```
+
+The resulting platform view may state that the endpoint attempted prohibited access, but the event remains an Agent decision rather than a FW observation.
+
 ## Layer-7 Boundary
 
 The initial Agent design may use **application/process identity** as an authorization fact without claiming that the endpoint is performing general deep packet inspection.
@@ -219,6 +242,88 @@ policy verified       != policy activated
 policy activated      != enforcement verified
 Agent service running != endpoint PEP healthy
 ```
+
+## Synchronized Endpoint Policy Projection
+
+Stronghold Agent must not maintain an unrelated endpoint policy universe that can silently drift from finalized Stronghold policy.
+
+Stronghold Access distributes the **device-applicable projection of the finalized Stronghold generation** to each managed Agent.
+
+```text
+FINALIZED STRONGHOLD GENERATION 844
+        |
+        +---- Stronghold FW projection
+        |
+        +---- FIN-PC-17 Agent projection
+        |
+        +---- HR-PC-22 Agent projection
+```
+
+The Agent projection is not the complete FW configuration. The FW and Agent enforce different responsibilities while deriving policy from the same governed generation.
+
+```text
+same finalized policy authority
+!=
+identical enforcement representation
+
+Agent policy projection
+!=
+complete FW configuration
+```
+
+When a new generation is finalized, Stronghold should make the applicable update available promptly to connected Agents. Push delivery is not assumed to equal activation.
+
+If an Agent is offline, asleep, disconnected, or otherwise misses the update, its next authenticated check-in must compare its active generation with the currently required generation. Stronghold Access then supplies the required signed projection according to the synchronization contract.
+
+```text
+policy generation finalized
+!=
+every Agent synchronized
+
+policy sent
+!=
+policy received
+
+policy received
+!=
+policy verified
+
+policy verified
+!=
+policy activated
+
+policy activated
+!=
+enforcement healthy
+```
+
+Generation drift must remain visible and attributable.
+
+## Off-Network Enforcement Continuity
+
+The active endpoint policy projection continues to govern applicable local connection behavior when the managed endpoint is away from the organization's network, subject to explicit validity, lease, holdover, expiration, and revocation semantics.
+
+Conceptually:
+
+```text
+FIN-PC-17
+    office LAN      -> active Agent policy 844
+    home network    -> active Agent policy 844
+    hotel network   -> active Agent policy 844
+    mobile hotspot  -> active Agent policy 844
+```
+
+Leaving the corporate LAN does not independently erase a Stronghold endpoint restriction.
+
+```text
+endpoint off corporate network
+!=
+endpoint policy disabled
+```
+
+This does not make the Agent a replacement for Stronghold FW. The Agent enforces endpoint-origin facts and local policy it can authoritatively establish. Network-side policy and network-side facts remain the responsibility of Stronghold FW when traffic is presented there or carried through an authorized Stronghold protected/remote-access path.
+
+See `docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`.
 
 ## Network Context from Stronghold Access / FW
 
@@ -498,9 +603,11 @@ destination / resource
 service / protocol
 Access Session ID
 Policy Generation
+policy identity / rule where established
 decision
 reason
 result
+packet-transmitted state where established
 UTC time
 endpoint clock-confidence state
 control-plane policy source
@@ -522,6 +629,8 @@ TRANSPORT_UNAVAILABLE
 
 Exact schema remains future work.
 
+A local DENY should make it possible to establish that the connection attempt was rejected at the Agent and, where established, that no packet was transmitted. It must not create a false FW observation.
+
 ## Local Administrator Boundary
 
 Stronghold must remain truthful about the Windows local-administrator/SYSTEM-equivalent threat boundary.
@@ -539,7 +648,9 @@ Potential policy states include:
 ```text
 POLICY_CURRENT
 POLICY_HOLDOVER
+POLICY_STALE
 POLICY_EXPIRED
+POLICY_REVOKED
 CONTROL_UNAVAILABLE
 ENFORCEMENT_DEGRADED
 ENFORCEMENT_FAILED
@@ -562,6 +673,8 @@ or:
 ```text
 control unavailable -> brick all endpoint networking
 ```
+
+The last verified generation must not be treated as valid forever merely because the Agent cannot currently reach Stronghold Access.
 
 ## Hunter Correlation
 
@@ -586,6 +699,8 @@ related packet segments
 ```
 
 Correlation is derived interpretation. It does not convert an endpoint record into a Stronghold FW source journal entry or physical-interface observation.
+
+For a locally denied connection, the correct correlated history may contain an endpoint decision with no FW packet observation because the Agent prevented transmission.
 
 ## Future Platforms
 
@@ -628,6 +743,8 @@ certificate / key protection
 Stronghold Access control protocol
 policy bundle schema / signing
 policy generation / lease / holdover
+policy convergence / check-in / missed-push behavior
+off-network policy continuity
 network-context fact source/generation
 WFP integration / layer selection
 filter ownership / cleanup
@@ -673,4 +790,4 @@ failure behavior
 
 ## Engineering Principle
 
-> **Stronghold Agent knows the endpoint side of the connection. Stronghold FW knows the network side. Stronghold Access coordinates authorization across the Stronghold platform without pretending those are the same source of truth.**
+> **Stronghold Agent knows the endpoint side of the connection. Stronghold FW knows the network side. Stronghold Access keeps the Agent's endpoint-applicable projection synchronized with finalized Stronghold policy so known-denied traffic can be stopped before transmission without pretending the FW observed or denied traffic that never reached it.**
