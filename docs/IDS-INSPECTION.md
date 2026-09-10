@@ -10,7 +10,7 @@ The governing principle is:
 
 > **Useful inspection of encrypted application traffic requires plaintext somewhere, but decrypted traffic must not become a second uncontrolled historical datastore or a mandatory dependency for ordinary Stronghold forwarding.**
 
-Stronghold therefore separates authoritative wire observation, selective proxy decryption, transient IDS transport, and persisted detection findings.
+Stronghold therefore separates authoritative wire observation, selective proxy decryption, transient IDS transport, persisted detection findings, and external threat-intelligence enrichment.
 
 ## Authority and Data Classes
 
@@ -36,6 +36,11 @@ OPTIONAL RETAINED INSPECTION CONTEXT
     explicit policy only
     encrypted at rest
     separately retained/authorized
+
+PATHFINDER INTELLIGENCE
+    external ISS threat-intelligence record / interpretation
+    separate authority from Stronghold observation and IDS findings
+    referenced by record/version/provenance when used
 ```
 
 The following distinctions are mandatory:
@@ -46,6 +51,9 @@ IDS finding                    != authoritative packet
 IDS finding retained           != full decrypted session retained
 inspection feed lost           != packet observation lost
 decrypted in FW memory         != decrypted retained on FW
+Pathfinder match               != IDS detection
+IDS finding                    != Pathfinder confirmation
+Pathfinder classification      != Stronghold enforcement action
 ```
 
 ## Selective Proxy Architecture
@@ -114,22 +122,6 @@ FAILED
 
 with explicit reasons.
 
-Examples:
-
-```text
-Inspection: PROXY_INSPECTED
-Reason: policy INSPECT-USERS-WEB
-
-Inspection: BYPASSED
-Reason: PINNED_APPLICATION
-
-Inspection: BYPASSED
-Reason: MUTUAL_TLS
-
-Inspection: NOT_AVAILABLE
-Reason: UNSUPPORTED_PROTOCOL
-```
-
 Inspection bypass never means the original traffic was not observed by the Stronghold physical-interface capture path.
 
 ## Inspection CA and Trust Separation
@@ -137,17 +129,6 @@ Inspection bypass never means the original traffic was not observed by the Stron
 The inspection certificate authority is purpose-specific.
 
 Stronghold should favor a customer-controlled inspection trust architecture rather than any universal Iron Signal Systems interception root.
-
-Conceptually:
-
-```text
-CUSTOMER TRUST / PKI
-        │
-        └── STRONGHOLD INSPECTION CA
-                ├── temporary leaf for requested hostname A
-                ├── temporary leaf for requested hostname B
-                └── ...
-```
 
 Inspection-signing credentials remain separate from:
 
@@ -158,6 +139,7 @@ HA identity
 management/API identity
 journal-signing identity
 IDS transport identity
+Pathfinder integration identity
 ```
 
 Private inspection CA material should be hardware protected/non-exportable where supported, subject to later recovery and key-management design.
@@ -231,9 +213,7 @@ temporary files
 memory-backed filesystems with persistence/swap behavior
 ```
 
-The later implementation should use bounded process buffers and platform-appropriate memory/dump controls. A memory filesystem must not be assumed to satisfy the contract merely because it is named `tmpfs` or equivalent.
-
-Stronghold support/diagnostic tooling must treat inspection memory and crash artifacts as high-sensitivity material.
+The later implementation should use bounded process buffers and platform-appropriate memory/dump controls. Stronghold support/diagnostic tooling must treat inspection memory and crash artifacts as high-sensitivity material.
 
 ## Dedicated IDS / Inspection Transport
 
@@ -253,40 +233,18 @@ IDS / INSPECTION JAIL
 
 There is no plaintext fallback.
 
-Both sides require:
-
-```text
-certificate validity
-+
-correct IDS/inspection credential purpose
-+
-explicit peer authorization
-```
-
-A valid certificate alone is never sufficient authorization.
+Both sides require certificate validity, correct IDS/inspection credential purpose, and explicit peer authorization.
 
 ## IDS Transport Identity Separation
 
-IDS/inspection transport credentials are separate from authoritative HISTORY transport credentials.
-
-Conceptually:
-
-```text
-FW Appliance ID
-    ├── HISTORY transport credential
-    └── INSPECTION transport credential
-
-Hunter Appliance ID
-    ├── HISTORY ingest credential
-    └── IDS inspection credential
-```
-
-The exact certificate profile, extension/purpose representation, enrollment, rotation, and revocation mechanics remain to be frozen with the Stronghold cryptographic profile.
+IDS/inspection transport credentials are separate from authoritative HISTORY transport credentials and Pathfinder integration credentials.
 
 ```text
 HISTORY transport identity
 !=
 INSPECTION transport identity
+!=
+Pathfinder integration identity
 ```
 
 ## HISTORY vs INSPECTION Transport
@@ -310,24 +268,11 @@ INSPECTION
     lower priority than authoritative history
 ```
 
-They require separate:
-
-```text
-credentials
-authorization
-queues
-resource accounting
-health state
-failure state
-```
-
-A later high-throughput profile may qualify a dedicated physical `INSPECTION` interface if measurement shows that sharing the history fabric risks authoritative transfer or predictable inspection service.
+They require separate credentials, authorization, queues, resource accounting, health state, and failure state.
 
 ## Net-Hunter IDS / Inspection Jail
 
 The future IDS function belongs in a distinct isolated jail rather than being silently folded into the existing Record Processing Jail.
-
-The current conceptual jail set becomes:
 
 ```text
 1. PCAP Data Ingest Jail
@@ -349,6 +294,7 @@ retention/hold administration
 authoritative PCAP writes
 FW configuration backups
 key-management authority
+Pathfinder configuration authority
 ```
 
 The jail is intended to be replaceable/rebuildable without altering authoritative PCAP or source journals.
@@ -371,6 +317,7 @@ Hunter ZFS
     derived/
       records/
       indexes/
+      intelligence-correlation/
 
     inspection/
       findings/
@@ -379,21 +326,11 @@ Hunter ZFS
 
 The exact dataset names are illustrative, not frozen.
 
-The `inspection` domain is encrypted at rest and may use a separate encryption root/key from ordinary authoritative and derived datasets.
-
-The **FreeBSD host retains ZFS/key-management authority**. The IDS jail receives only the mounted dataset access required for its role.
-
-```text
-IDS jail access
-!=
-ZFS key-management authority
-```
+The FreeBSD host retains ZFS/key-management authority. The IDS jail receives only the mounted dataset access required for its role.
 
 ## Inspection Persistence Classes
 
 Stronghold should preserve multiple explicit persistence classes rather than silently retaining full plaintext whenever IDS is enabled.
-
-Conceptual direction:
 
 ```text
 FINDINGS_ONLY
@@ -432,11 +369,88 @@ source/destination context
 original PCAP segment references
 bounded matched/context material where explicitly permitted
 processing generation
+Pathfinder Record references where correlated later
 ```
 
 A finding is derived interpretation and never replaces the authoritative encrypted-wire PCAP.
 
 Because findings themselves may contain sensitive information such as URLs, hostnames, headers, filenames, usernames, payload fragments, or malware strings, the findings store is encrypted at rest even when full decrypted sessions are not retained.
+
+## Pathfinder Intelligence Complement
+
+Pathfinder is intended to complement Stronghold IDS/IPS, not replace the IDS detector, ruleset, or Stronghold policy engine.
+
+Pathfinder remains a separate ISS threat-intelligence authority governed by `docs/PATHFINDER-INTEGRATION.md`.
+
+Conceptually:
+
+```text
+                 STRONGHOLD OBSERVATION
+                          |
+                          v
+                     IDS ANALYSIS
+                          |
+              +-----------+-----------+
+              |                       |
+              v                       v
+       protocol/content           PATHFINDER
+          detection              intelligence
+              |                       |
+              +-----------+-----------+
+                          |
+                          v
+                   CORRELATION / CONTEXT
+```
+
+Pathfinder may enrich an IDS finding or flow with context such as:
+
+```text
+observable classification
+confidence
+source provenance
+first/last-seen context
+campaign / malware association
+related infrastructure
+certificate/hash/domain relationships
+Pathfinder Record ID
+interpretation generation/version
+```
+
+Example:
+
+```text
+IDS
+    suspicious TLS/application behavior
+
+Pathfinder
+    destination associated with known C2
+    certificate fingerprint previously reported
+    domain related to a current campaign
+
+Stronghold
+    source is a finance endpoint
+    first contact from this device
+    policy allowed the flow
+    authoritative PCAP preserved
+```
+
+These remain separate facts.
+
+```text
+Pathfinder match
+!=
+IDS detection
+
+IDS finding
+!=
+Pathfinder confirmation
+
+IDS finding + Pathfinder match
+!=
+automatic IPS authority
+```
+
+Any later enforcement action based on the combination remains an explicit Stronghold policy decision and is journaled as what Stronghold actually did.
 
 ## Historical Reprocessing Limitation
 
@@ -448,13 +462,19 @@ encrypted historical PCAP
 historical plaintext available
 ```
 
-Stronghold should not retain TLS session secrets by default merely to enable later retrospective decryption. Doing so would substantially increase the breach impact of Net-Hunter and requires a separate explicit future security decision if ever considered.
+Stronghold should not retain TLS session secrets by default merely to enable later retrospective decryption.
+
+However, Pathfinder intelligence can still be applied retrospectively to historical flow/observable metadata and source packet references where the relevant observable is derivable from retained history.
+
+```text
+retrospective Pathfinder match
+!=
+historical plaintext reconstruction
+```
 
 ## Inspection Retention
 
 Inspection findings/context have retention independent from authoritative PCAP and other journal domains.
-
-Conceptually:
 
 ```text
 AUTHORITATIVE PCAP
@@ -465,9 +485,10 @@ IDS FINDINGS
 
 DECRYPTED RETAINED CONTEXT
     retention policy C
-```
 
-Holds, destruction authorization, crypto-shred authority, and journaled destruction apply according to the eventual retention model for each class.
+PATHFINDER-DERIVED CORRELATION
+    derived/rebuildable lineage according to Hunter policy
+```
 
 ```text
 IDS finding expired
@@ -481,20 +502,11 @@ Stronghold FW remains a firewall/capture appliance first.
 
 On FW, the inspection system performs only the work needed to proxy the selected live connection and create the bounded transient inspection feed.
 
-Deep IDS parsing/rule evaluation belongs on Hunter where possible.
+Deep IDS parsing/rule evaluation and richer Pathfinder correlation belong on Hunter where possible.
 
-The inspection path never outranks:
+The inspection/intelligence path never outranks packet acquisition, active authoritative PCAP writes, essential segment finalization/integrity, essential forwarding/enforcement work, critical HA heartbeat/control, or authoritative history transfer needed to protect backlog.
 
-```text
-packet acquisition
-active authoritative PCAP writes
-essential segment finalization/integrity
-essential forwarding/enforcement work
-critical HA heartbeat/control
-authoritative history transfer needed to protect backlog
-```
-
-Exact ordering against other secondary work must be benchmarked later.
+Pathfinder lookups must not become an unbounded synchronous per-packet dependency on the FW dataplane.
 
 ## Inspection Backpressure and Failure
 
@@ -513,41 +525,32 @@ Stronghold
     records INSPECTION_FEED_GAP / degraded coverage truthfully
 ```
 
-The exact counter/location/granularity contract remains to be frozen.
-
-A future explicitly configured `MUST_INSPECT` or IPS policy may choose fail-closed behavior, but such behavior must be explicit, scoped, and separately qualified. It is not the global default merely because IDS/IPS exists.
+A Pathfinder outage or stale intelligence condition is independently represented and does not masquerade as an IDS failure.
 
 ```text
+Pathfinder unavailable
+!=
+IDS unavailable
+
 IDS unavailable
 !=
 production forwarding unavailable
 ```
 
-unless explicit policy requires that dependency.
+A future explicitly configured `MUST_INSPECT` or IPS policy may choose fail-closed behavior, but such behavior must be explicit, scoped, and separately qualified.
 
 ## IDS vs IPS
 
 Deep Hunter analysis should not become a per-packet synchronous forwarding oracle.
 
-The architecture intentionally avoids:
-
-```text
-packet
-  ↓
-FW decrypts
-  ↓
-wait for Hunter deep IDS decision
-  ↓
-FW forwards/drops
-```
-
-for ordinary traffic.
+The architecture intentionally avoids making every packet wait for Hunter deep IDS or Pathfinder analysis before forwarding.
 
 Future IPS may use carefully bounded mechanisms such as:
 
 ```text
 local FW proxy termination for specifically qualified immediate rules
 Hunter detection producing an authorized dynamic enforcement fact for new/future flows
+Pathfinder-enriched intelligence contributing to a policy input
 explicit policy requiring inspection before continuation
 ```
 
@@ -563,17 +566,9 @@ inline enforcement
 
 QUIC/HTTP/3 requires deliberate future handling.
 
-Possible future policy behaviors may include:
-
-```text
-native QUIC proxy/termination
-explicit QUIC bypass
-policy-driven HTTP/3 suppression/fallback
-```
+Possible future policy behaviors may include native QUIC proxy/termination, explicit QUIC bypass, or policy-driven HTTP/3 suppression/fallback.
 
 Stronghold must report which behavior occurred. It must not silently disable QUIC and imply native inspection support.
-
-Exact QUIC architecture remains unfrozen.
 
 ## Mutual TLS
 
@@ -591,18 +586,11 @@ safe to transparently intercept
 
 Applications that intentionally pin a server certificate/public key should normally bypass or report unsupported inspection rather than Stronghold attempting generic pinning defeat.
 
-```text
-pinned application
-    → BYPASS / UNSUPPORTED according to policy
-```
-
-This failure/bypass state remains visible in inspection coverage.
-
 ## Inspection Coverage
 
 Stronghold must not present `DPI ENABLED` as proof that encrypted traffic was actually inspected.
 
-Inspection coverage should be able to distinguish at least conceptually:
+Inspection coverage should distinguish at least conceptually:
 
 ```text
 traffic observed
@@ -614,9 +602,11 @@ inspection feed delivered
 inspection feed dropped/degraded
 IDS processing completed
 finding generated
+Pathfinder enrichment available / unavailable / stale
+Pathfinder correlation applied
 ```
 
-An incomplete inspection feed or unsupported application must remain visible as coverage limitation.
+An incomplete inspection feed, unsupported application, or unavailable intelligence source must remain visible as a coverage limitation.
 
 ## Support and Diagnostic Boundaries
 
@@ -628,11 +618,12 @@ In particular:
 - IDS memory/core dumps are high-sensitivity artifacts;
 - debug logging must not casually dump plaintext payload;
 - inspection at-rest keys are not exposed to support identities merely because they can diagnose the jail;
+- Pathfinder integration credentials are not exposed through ordinary IDS diagnostics;
 - temporary diagnostic actions must not create a plaintext spool.
 
 ## Health and Alerting
 
-The observability architecture in `docs/OBSERVABILITY.md` later needs independent IDS/inspection health such as:
+The observability architecture later needs independent IDS/inspection and Pathfinder-integration health such as:
 
 ```text
 proxy availability
@@ -644,13 +635,14 @@ processing backlog
 ruleset/engine generation
 inspection storage health
 inspection coverage
+Pathfinder integration availability
+Pathfinder data freshness
+Pathfinder sync/backlog state
 ```
 
-Healthy forwarding/capture must not hide degraded inspection, and degraded inspection must not be reported as packet-observation loss when the authoritative capture path remained healthy.
+Healthy forwarding/capture must not hide degraded inspection, and degraded inspection/intelligence must not be reported as packet-observation loss when the authoritative capture path remained healthy.
 
 ## Architecture Invariants
-
-The following are frozen architectural requirements for any later IDS/TLS-inspection implementation:
 
 > **TLS/application inspection is an explicitly selected proxy function, not a prerequisite for ordinary Stronghold forwarding.**
 
@@ -662,13 +654,11 @@ The following are frozen architectural requirements for any later IDS/TLS-inspec
 
 > **Net-Hunter IDS processing occurs in an isolated future IDS/Inspection Jail. Any inspection-derived material that persists is stored only in a dedicated encrypted-at-rest inspection domain whose key-management authority remains with the Hunter host.**
 
-> **The INSPECTION transport, identities, queues, health, persistence, and failure semantics remain separate from authoritative HISTORY transport.**
+> **Normal IDS overload, Pathfinder unavailability, or Hunter unavailability does not silently backpressure ordinary production forwarding. Any fail-closed behavior must be explicit and scoped.**
 
-> **Normal IDS overload or Hunter unavailability does not silently backpressure production forwarding. Inspection loss/degradation is measured and reported. Any fail-closed behavior must be explicit and scoped.**
+> **Full decrypted sessions and TLS session secrets are not retained by default. Findings-only is the default architectural direction.**
 
-> **Full decrypted sessions and TLS session secrets are not retained by default. Findings-only is the default architectural direction; bounded/full decrypted retention requires explicit later policy and qualification.**
-
-> **Authoritative encrypted PCAP remains the wire-history authority. IDS findings are derived interpretation and retain provenance toward the applicable original history where available.**
+> **Authoritative encrypted PCAP remains the wire-history authority. IDS findings and Pathfinder intelligence are separate forms of interpretation/context and retain provenance toward their sources.**
 
 ## Truth Boundaries
 
@@ -691,6 +681,11 @@ IDS storage unavailable            != permission to spool plaintext
 IDS unavailable                    != production forwarding unavailable
 deep detection                     != inline enforcement
 inspection configured              != inspection coverage complete
+Pathfinder record exists           != observable malicious
+Pathfinder match                   != IDS detection
+IDS finding                        != Pathfinder confirmation
+Pathfinder confidence HIGH         != IPS action authorized
+retrospective intelligence match   != historical real-time detection
 ```
 
 ## Deliberately Unfrozen
@@ -714,6 +709,8 @@ exact inspection ZFS dataset/key hierarchy
 QUIC/HTTP3 handling
 mTLS service-specific proxy mechanisms
 inline IPS enforcement architecture
+Pathfinder-to-IDS correlation schema
+Pathfinder-driven policy vocabulary
 fail-open/fail-closed policy vocabulary
 performance/capacity profiles
 physical HISTORY vs INSPECTION interface requirements
