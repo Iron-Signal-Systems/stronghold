@@ -2,27 +2,30 @@
 
 ## Purpose
 
-**Stronghold Agent** is the endpoint application for Stronghold-managed endpoint identity, enrichment, local enforcement, protected transport, and Stronghold Access participation.
+**Stronghold Agent** is the endpoint component of the Stronghold platform for Stronghold-managed endpoint identity, enrichment, local enforcement, protected transport, and Stronghold Access participation.
 
-Stronghold Agent is a separate implementation project from Stronghold Access and Stronghold FW.
+Stronghold Agent has a separate implementation boundary from Stronghold Access and Stronghold FW, but it is not a separate unrelated product. It is the endpoint-side Stronghold Policy Enforcement Point managed and coordinated through Stronghold Access.
 
 Stronghold Agent is not an EDR, not a replacement enterprise identity provider, not an independent Stronghold Policy Engine, and not a hidden endpoint firewall product with its own unrelated policy model.
 
 Its governing role is:
 
-> **Establish endpoint-origin facts, enforce authorized policy locally, protect selected traffic before it crosses an untrusted network, and report what the endpoint actually decided and performed.**
+> **Establish endpoint-origin facts, enforce authorized Stronghold policy locally, protect selected traffic before it crosses an untrusted network, and report what the endpoint actually decided and performed.**
 
-## Product Boundary
+## Component Boundary
 
 ```text
 Stronghold Access
-    control framework / policy authority
+    Stronghold control framework / policy authority
 
 Stronghold Agent
-    endpoint application / endpoint PEP
+    Stronghold endpoint component / endpoint PEP
 
 Stronghold FW
-    independent network PEP
+    independent Stronghold network PEP
+
+Stronghold Net-Hunter
+    Stronghold historical correlation / hunt
 ```
 
 Implementation belongs under:
@@ -31,7 +34,9 @@ Implementation belongs under:
 go/agent/
 ```
 
-Stronghold Agent must not import Stronghold Access internal implementation packages. Interaction occurs through explicitly versioned control, policy, identity, and session contracts.
+Stronghold Agent must not import Stronghold Access internal implementation packages. Interaction occurs through explicitly versioned Stronghold control, policy, identity, and session contracts.
+
+See `docs/PROJECT-BOUNDARIES.md`.
 
 ## Initial Windows Direction
 
@@ -175,7 +180,7 @@ A future deep-L7 design would require explicit review of protocol coverage, TLS 
 
 ## Stronghold Access Relationship
 
-Stronghold Access is the control framework and policy authority for Agent-managed access behavior.
+Stronghold Access is the Stronghold control framework and policy authority for Agent-managed access behavior.
 
 Conceptually:
 
@@ -252,6 +257,39 @@ new endpoint policy activated
 ```
 
 Network-context changes should cause policy reevaluation through Stronghold Access rather than trigger ad hoc per-packet commands from the FW. Policy distribution should use signed/versioned generations with explicit lease/holdover behavior.
+
+## Pathfinder Boundary
+
+Iron Signal Systems Pathfinder is a separate threat-intelligence system and is not an endpoint control authority.
+
+Stronghold Agent should normally **not** query Pathfinder directly.
+
+Preferred flow:
+
+```text
+Pathfinder
+    -> Stronghold Access
+        -> signed / versioned Stronghold Agent policy
+            -> Stronghold Agent
+```
+
+This avoids creating Pathfinder credentials, trust state, update logic, and intelligence-query dependencies on every endpoint.
+
+The Agent may enforce policy that was influenced by Pathfinder-derived context, but the Agent receives the resulting authorized Stronghold policy rather than treating a Pathfinder match as an endpoint command.
+
+```text
+Pathfinder match
+!=
+Agent DENY authority
+
+Pathfinder risk signal
+!=
+endpoint compromise proven
+```
+
+If a future requirement needs direct Agent↔Pathfinder communication, it requires a separate approved contract and threat model.
+
+See `docs/PATHFINDER-INTEGRATION.md`.
 
 ## Operating Modes
 
@@ -543,6 +581,7 @@ service
 endpoint decision
 FW decision
 WireGuard transport
+Pathfinder Record / interpretation reference where Access policy used it
 related packet segments
 ```
 
@@ -570,9 +609,9 @@ Stronghold Access implementation belongs under:
 go/access/
 ```
 
-Do not create direct imports between one project's internal packages and the other project's internal packages.
+Do not create direct imports between one component's internal packages and another component's internal packages.
 
-If shared protocol/schema code later becomes necessary, freeze the protocol first and give the shared contract explicit ownership/versioning. Do not create generic `common`, `util`, `framework`, or `shared` packages as a shortcut around project boundaries.
+If shared protocol/schema code later becomes necessary, freeze the protocol first and give the shared contract explicit ownership/versioning. Do not create generic `common`, `util`, `framework`, or `shared` packages as a shortcut around component boundaries.
 
 ## Qualification Requirements
 
@@ -601,6 +640,7 @@ Protected Endpoint transport contract
 full-tunnel bypass/leak matrix
 WireGuard integration
 Agent / FW dual-PEP semantics
+Pathfinder-influenced policy provenance
 endpoint decision record schema
 record integrity / transport
 local-admin tamper boundary
@@ -633,4 +673,4 @@ failure behavior
 
 ## Engineering Principle
 
-> **Stronghold Agent knows the endpoint side of the connection. Stronghold FW knows the network side. Stronghold Access coordinates authorization without pretending those are the same source of truth.**
+> **Stronghold Agent knows the endpoint side of the connection. Stronghold FW knows the network side. Stronghold Access coordinates authorization across the Stronghold platform without pretending those are the same source of truth.**
