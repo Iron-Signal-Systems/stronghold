@@ -2,7 +2,7 @@
 
 ## Purpose
 
-**Stronghold Access** is the Stronghold platform's access-control and authorization-coordination infrastructure component.
+**Stronghold Access** is the Stronghold platform's access-control, distributed-policy coordination, and authorization-coordination infrastructure component.
 
 Stronghold Access is **not a separate standalone commercial product**. It is the third Stronghold infrastructure node when deployed, running on a supported customer virtual machine or supported bare-metal server on the customer's network.
 
@@ -20,11 +20,15 @@ Stronghold Access Sessions
 resource-scoped authorization
 revocation / reevaluation
 policy distribution to Stronghold Agent
+endpoint policy-generation synchronization
+Agent check-in / convergence state
 controlled integration with Stronghold FW
 optional Pathfinder intelligence / risk inputs
 ```
 
 Stronghold Access does **not** own Stronghold FW packet capture, routing, NAT, dataplane forwarding, physical-interface observation, FW Traffic Decision Journals, or Net-Hunter authoritative packet history.
+
+The cross-component policy synchronization and early-enforcement contract is governed by `docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`.
 
 ## Platform Boundary
 
@@ -41,6 +45,7 @@ Stronghold Access
     third infrastructure component
     customer VM or bare-metal server
     control / identity / authorization coordination
+    endpoint policy synchronization / convergence
 
 Stronghold Agent
     endpoint component / endpoint PEP
@@ -79,7 +84,7 @@ Conceptually:
                    authorization context
 ```
 
-Stronghold Access is control-plane infrastructure, not the Stronghold FW high-rate packet dataplane. Its sizing and qualification should therefore be based on endpoint population, authentication/authorization rate, AAA rate, policy distribution, revocation rate, session count, state/database behavior, and availability requirements rather than packet PPS.
+Stronghold Access is control-plane infrastructure, not the Stronghold FW high-rate packet dataplane. Its sizing and qualification should therefore be based on endpoint population, authentication/authorization rate, AAA rate, policy distribution, policy-generation convergence, Agent check-in rate, revocation rate, session count, state/database behavior, and availability requirements rather than packet PPS.
 
 Exact supported host OS, hypervisors, database/storage model, HA model, backup/recovery model, and sizing profiles remain to be frozen.
 
@@ -133,6 +138,8 @@ The exact wire schema, signing, replay protection, sequencing, lease behavior, a
 
 > **Endpoint ALLOW never grants permission that Stronghold FW would otherwise deny.**
 
+> **An endpoint-local DENY may prevent transmission entirely; reporting that attempt does not become a fabricated FW observation.**
+
 > **Pathfinder intelligence is an input to policy, not policy authority by itself.**
 
 Mandatory separations include:
@@ -147,10 +154,13 @@ process authorized                   != resource authorized
 Access GRANT                         != FW ALLOW
 endpoint ALLOW                       != FW ALLOW
 endpoint DENY                        != FW observed DENY
+endpoint attempt reported            != FW observed packet
 WireGuard peer authenticated         != user authenticated
 tunnel established                  != resource authorized
 network assignment                   != trusted endpoint
 MAB admitted                         != 802.1X authenticated
+policy generation finalized          != every Agent synchronized
+policy sent                          != policy activated
 Pathfinder risk signal               != automatic Access REVOKE
 Pathfinder malicious classification  != compromise proven
 ```
@@ -350,6 +360,77 @@ The Agent is not an independent Stronghold Policy Engine and must not silently g
 
 See `docs/agent/ARCHITECTURE.md`.
 
+## Finalized Policy Generation and Agent Convergence
+
+Stronghold Access coordinates distribution of the device-applicable endpoint projection of a finalized Stronghold policy generation.
+
+```text
+FINALIZED STRONGHOLD GENERATION
+        |
+        +---- Stronghold FW projection
+        |
+        +---- device-specific Agent projection
+```
+
+The Agent projection does not need to contain the complete FW configuration. It contains the policy representation needed for that endpoint PEP while preserving the same finalized policy authority.
+
+```text
+same finalized policy authority
+!=
+identical enforcement representation
+
+Agent policy projection
+!=
+complete FW configuration
+```
+
+When a new generation is finalized, Stronghold Access should make the applicable endpoint projection available promptly to connected Agents. Push or publication success is not proof of fleet convergence.
+
+Stronghold Access should track, at minimum conceptually:
+
+```text
+Device ID
+required policy generation
+last reported active generation
+last acknowledged generation
+last check-in
+policy delivery state
+policy verification state where reported
+policy activation state where reported
+policy lease / expiration state
+Agent health / enforcement state
+```
+
+If an Agent misses an update because it is powered off, asleep, disconnected, or otherwise unavailable, its next authenticated check-in must compare the Agent's active generation with the currently required generation and deliver the applicable signed update when required.
+
+```text
+policy generation finalized
+!=
+every Agent synchronized
+
+policy sent
+!=
+policy received
+
+policy received
+!=
+policy verified
+
+policy verified
+!=
+policy activated
+
+policy activated
+!=
+enforcement healthy
+```
+
+Generation drift must remain visible rather than being treated as successful convergence.
+
+The active endpoint projection continues to govern applicable local behavior when the device is off the organization's network, subject to explicit policy lease, holdover, expiration, and revocation semantics. This is a principal reason Stronghold Access exists as a separate third infrastructure component rather than placing endpoint fleet coordination inside the high-rate FW dataplane.
+
+See `docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`.
+
 ## Network Context and Endpoint Policy Distribution
 
 Stronghold FW and qualified network-admission sources can contribute network-side facts that the endpoint itself cannot authoritatively self-assert, including observed VLAN, zone, interface, address association, and other qualified attachment context.
@@ -432,6 +513,8 @@ endpoint permitted traffic
 !=
 FW authorized traffic
 ```
+
+If the active Agent policy definitively denies a connection, the endpoint need not transmit the traffic merely so the FW can deny it again. Stronghold Access may receive and correlate the endpoint decision record so operators know the attempt occurred while preserving that the FW never observed the packet.
 
 The first Windows direction is process/application-aware connection authorization, not a requirement for endpoint deep-payload inspection. Any later payload-aware proxy or WFP callout-driver architecture is separately qualified.
 
@@ -615,6 +698,8 @@ related authoritative packet segments
 
 Correlation is derived interpretation and does not rewrite source authority.
 
+For an Agent-local DENY, a correct correlated history may contain an endpoint decision with no corresponding FW packet observation because the Agent prevented transmission.
+
 Net-Hunter is not required for Access to make routine authorization decisions.
 
 ## Availability and Failure Boundaries
@@ -651,6 +736,8 @@ trusted
 ```
 
 Pathfinder unavailability must not be represented as a safe intelligence result.
+
+An Agent's last verified policy generation must not become valid forever solely because Access is unavailable. Exact lease, holdover, stale, expiration, and profile-specific failure behavior must be explicit.
 
 ## Implementation Boundary
 
@@ -689,6 +776,10 @@ application/process binding semantics
 MFA model
 posture model
 policy language / generations
+FW and Agent enforcement-projection rules
+Agent policy convergence / check-in / missed-push behavior
+off-network policy continuity
+policy lease / holdover / stale / expiration semantics
 network-context fact contract from FW/admission
 Agent control protocol
 FW control protocol
@@ -708,4 +799,4 @@ upgrade / rollback
 
 ## Engineering Principle
 
-> **Stronghold Access coordinates authorization across the Stronghold platform. It does not erase the independent authority of endpoint enforcement, network admission, Stronghold FW, or Pathfinder's threat-intelligence interpretation.**
+> **Stronghold Access coordinates authorization and policy convergence across the Stronghold platform. It keeps each managed Agent aligned to the endpoint-applicable projection of finalized Stronghold policy without erasing the independent authority of endpoint enforcement, network admission, Stronghold FW, or Pathfinder's threat-intelligence interpretation.**
