@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the current architectural direction for Stronghold Net-Hunter records, indexing, search, correlation, query coverage, and historical reprocessing.
+This document defines the architectural direction for Stronghold Net-Hunter records, indexing, search, correlation, query coverage, historical reprocessing, and external intelligence enrichment.
 
 It does not select a database product or implementation technology. It defines what any later implementation must preserve.
 
@@ -21,7 +21,7 @@ Hunter Processing Journal
 configuration generations
 integrity / lineage information
 
-        ↓ derive
+        ↓ derive / correlate / enrich
 
 SEARCHABLE / DERIVED
 
@@ -30,6 +30,7 @@ flows / sessions
 protocol records
 address / name relationships
 decision correlations
+Pathfinder intelligence correlations
 indexes
 timelines
 search facets
@@ -41,7 +42,7 @@ If authoritative PCAP or source journals are lost, Stronghold reports actual his
 
 ## Authority Boundaries
 
-Stronghold Net-Hunter maintains three distinct classes of information:
+Stronghold Net-Hunter maintains three Stronghold truth classes:
 
 ```text
 WHAT WAS PRESENTED
@@ -51,12 +52,24 @@ WHAT STRONGHOLD DID
     authoritative FW and Hunter journals
 
 WHAT STRONGHOLD UNDERSTOOD
-    derived records, correlation, enrichment, and indexes
+    derived records, correlation, enrichment, intelligence context, and indexes
 ```
 
-Derived databases and search indexes are rebuildable products of authoritative history.
+Iron Signal Systems Pathfinder is a separate authority for threat-intelligence records and interpretation.
 
-They must never silently become the only copy of a fact that Stronghold claims originated from packet observation.
+```text
+Stronghold observation
+!=
+Pathfinder intelligence
+
+Pathfinder interpretation
+!=
+Stronghold historical observation
+```
+
+Pathfinder-derived correlations in Hunter are derived state. They never rewrite source PCAP, FW journals, or the time at which Stronghold originally knew something.
+
+See `docs/PATHFINDER-INTEGRATION.md`.
 
 ## Two-Catalog Architecture
 
@@ -95,17 +108,13 @@ retention state
 hold state
 ```
 
-The exact schema remains future work.
-
 The segment catalog must remain sufficient to narrow candidate PCAP history even when higher-level derived indexes are unavailable or incomplete.
 
 ### Traffic / Record Catalog
 
-The traffic catalog contains derived records used to search, correlate, explain, and pivot into authoritative history.
+The traffic catalog contains derived records used to search, correlate, explain, enrich, and pivot into authoritative history.
 
 It should not require a database row for every captured packet merely to make traffic searchable.
-
-The preferred architecture is:
 
 ```text
 PCAP
@@ -117,6 +126,9 @@ FLOW / SESSION RECORDS
 PROTOCOL / EVENT RECORDS
     higher-level derived facts
 
+INTELLIGENCE CORRELATION
+    Pathfinder or other explicitly approved external enrichment
+
 PCAP LOCATORS
     references back toward authoritative packet history
 ```
@@ -127,9 +139,7 @@ Stronghold does not make a row-per-packet database the primary search architectu
 
 At meaningful packet rates, a required database row for every Ethernet frame creates unnecessary storage, indexing, and write amplification and risks turning the derived database into the practical source of truth.
 
-Packet-level detail remains in authoritative PCAPNG.
-
-Derived structures exist to narrow the search space and explain activity.
+Packet-level detail remains in authoritative PCAPNG. Derived structures exist to narrow the search space and explain activity.
 
 ## Conceptual Record Families
 
@@ -144,6 +154,8 @@ NAME / ADDRESS RELATIONSHIP
 FIREWALL DECISION
 ROUTE / WAN / NAT CORRELATION
 SYSTEM / CONFIGURATION REFERENCES
+ACCESS / ENDPOINT CORRELATION
+PATHFINDER INTELLIGENCE CORRELATION
 DERIVED ANALYSIS
 PROCESSING / INDEX STATE
 ```
@@ -161,39 +173,30 @@ Flow ID
 Origin Appliance ID
 first seen
 last seen
-
 ingress physical interface
 ingress VLAN
 source zone
-
 source MAC
 destination MAC
-
 source IP
 destination IP
-
 source port
 destination port
 protocol
-
 packet count
 byte count
-
 original tuple
 translated tuple where applicable
-
 selected WAN
 egress interface
 egress VLAN
-
 configuration generation
 policy decision references
+Access Session / endpoint references where correlated
 capture segment references
 ```
 
-Not every field applies to every flow.
-
-Stronghold must not force non-IP traffic into an IP-flow schema merely for implementation convenience.
+Not every field applies to every flow. Stronghold must not force non-IP traffic into an IP-flow schema merely for implementation convenience.
 
 ## Layer-2 and Control-Plane Records
 
@@ -219,20 +222,6 @@ unknown EtherTypes
 
 A decoded record never replaces the source frame.
 
-Example conceptual LLDP record:
-
-```text
-Origin Appliance ID
-source interface
-observed chassis ID
-observed port ID
-system name
-first seen
-last seen
-PCAP references
-decoder/version provenance
-```
-
 ## Historical Relationships
 
 Net-Hunter treats relationships as time-bounded observations rather than one timeless current mapping.
@@ -246,11 +235,11 @@ hostname ↔ DNS answer
 DHCP lease
 VLAN membership
 CDP / LLDP adjacency
+user/device ↔ Access Session where source-qualified
+endpoint process ↔ destination where source-qualified
 ```
 
-For example, one IP may legitimately correlate to different MAC addresses during different intervals.
-
-Stronghold must preserve those intervals instead of overwriting a historical relationship with the newest value.
+Stronghold preserves historical intervals instead of overwriting them with the newest relationship.
 
 ## Provenance on Derived Facts
 
@@ -271,11 +260,11 @@ processing time
 decoder / correlator identity
 processing generation
 relationship type / confidence
+external enrichment source
+external record / interpretation identity
 ```
 
-### Direct and Correlated Facts
-
-Stronghold distinguishes directly observed protocol facts from later correlation or external/user context.
+### Direct, Correlated, External, and User Context
 
 Conceptual provenance classes include:
 
@@ -287,7 +276,7 @@ CORRELATED
     derived by combining direct observations
 
 EXTERNAL
-    supplied by a later approved enrichment source
+    supplied by an approved enrichment source such as Pathfinder
 
 USER_SUPPLIED
     analyst annotation/context
@@ -295,9 +284,7 @@ USER_SUPPLIED
 NOT_KNOWN
 ```
 
-Exact names remain future schema work.
-
-A DNS-associated hostname must not be represented as directly observed TLS SNI merely because both refer to the same IP.
+A Pathfinder classification must remain `EXTERNAL`/intelligence-derived context rather than being represented as if directly observed on the wire.
 
 ## Search Philosophy
 
@@ -316,25 +303,29 @@ show everything involving port 445
 show traffic between 01:00 and 03:00
 show events during a firewall configuration change
 show traffic before and after HA failover
+show traffic associated with Pathfinder Record PF-...
+show prior contact with observables Pathfinder now classifies as C2
 ```
 
 Search results should support pivots such as:
 
 ```text
-IP
+IP / domain / observable
  ↓
 flows
  ↓
 policy decision
  ↓
+Access / endpoint context
+ ↓
 NAT / WAN / route
  ↓
-name/address relationships
+Pathfinder intelligence
  ↓
 PCAP
 ```
 
-CLI/UI/API design should hide database mechanics without hiding the underlying source and provenance.
+CLI/UI/API design should hide database mechanics without hiding source and provenance.
 
 ## High-Value Search Pivots
 
@@ -358,56 +349,29 @@ segment ID
 Appliance ID
 Cluster ID
 journal operation ID
+Access Session ID
+Endpoint Decision ID
+Pathfinder Record ID
+Pathfinder observable / classification where indexed
 ```
 
 Actual indexing strategy is benchmark-driven and remains implementation work.
 
 ## Time-Range Pruning
 
-Most investigations have a bounded time range.
-
-Net-Hunter should use segment metadata and later partition/index structures to narrow historical search early rather than scanning the full retained history when unnecessary.
-
-The exact time-partitioning/sharding strategy remains implementation work.
+Most investigations have a bounded time range. Net-Hunter should use segment metadata and later partition/index structures to narrow historical search early rather than scanning all retained history when unnecessary.
 
 ## Database / Index Technology Is Not Yet Selected
 
 Stronghold does not currently bind Net-Hunter to PostgreSQL, OpenSearch, ClickHouse, SQLite, a custom index, or another specific database technology.
 
-Requirements are frozen before technology selection.
-
-Any candidate implementation must be evaluated against:
-
-```text
-authority boundaries
-record types
-write / ingest rate
-query patterns
-retention behavior
-rebuild behavior
-expected scale
-query latency
-failure behavior
-operational complexity
-```
+Any candidate implementation must be evaluated against authority boundaries, record types, ingest rate, query patterns, retention, rebuild behavior, expected scale, query latency, failure behavior, and operational complexity.
 
 The architecture must not be reshaped merely to fit a convenient database product.
 
 ## Indexes Are Rebuildable
 
 > **An index may be deleted and rebuilt without altering authoritative source history.**
-
-Example:
-
-```text
-index corrupt
-    ↓
-mark index unavailable / degraded
-    ↓
-rebuild derived index
-    ↓
-source PCAP and source journals remain unchanged
-```
 
 Stronghold should distinguish:
 
@@ -422,24 +386,9 @@ from actual source-history unavailability.
 
 > **Stronghold must never present an incomplete index as complete history.**
 
-If authoritative packet history is retained through 18:00 but an index is complete only through 16:42, a query covering 00:00–18:00 must expose the incomplete coverage.
-
-Conceptually:
-
-```text
-Requested:
-    00:00–18:00
-
-Indexed:
-    00:00–16:42
-
-Unprocessed / not indexed:
-    16:42–18:00
-```
-
 A zero-result answer from an incomplete index must not be represented as proof that no matching traffic exists.
 
-Net-Hunter must distinguish at least conceptually:
+Net-Hunter must distinguish conceptually:
 
 ```text
 not observed
@@ -448,6 +397,8 @@ captured but not processed
 processed but not decoded
 decoded but not indexed
 indexed and no result
+Pathfinder enrichment pending
+Pathfinder enrichment stale/unavailable
 history destroyed
 history unavailable
 ```
@@ -457,8 +408,6 @@ These states answer different operational questions and must not be collapsed.
 ## Search Fallback to Authoritative Catalogs
 
 When derived indexes are unavailable or incomplete, Net-Hunter should retain a slower path through the segment catalog and authoritative source metadata.
-
-Conceptually:
 
 ```text
 normal hunt
@@ -480,19 +429,7 @@ The fallback may be slower, but the system should not become blind merely becaus
 
 Unknown traffic must not disappear from search merely because no higher-level decoder exists.
 
-Where available from observation metadata, Hunter should preserve searchable facts such as:
-
-```text
-EtherType
-IP protocol number
-MAC addresses
-interface
-VLAN
-time
-frame / packet size
-```
-
-along with explicit decoder state.
+Where available from observation metadata, Hunter should preserve searchable facts such as EtherType, IP protocol number, MAC addresses, interface, VLAN, time, and frame/packet size along with explicit decoder state.
 
 Examples:
 
@@ -508,27 +445,16 @@ Parser failure or unsupported protocol is information, not permission to erase d
 
 ## Reprocessing Architecture
 
-Authoritative PCAP/source journals allow Net-Hunter to reinterpret old history with newer decoders/correlators.
+Authoritative PCAP/source journals allow Net-Hunter to reinterpret old history with newer decoders, correlators, and intelligence.
 
 Reprocessing never rewrites the original observation.
 
-Example:
-
 ```text
-Observation time:
-    2028-06-14
-
-Original processing:
-    DECODER_NOT_AVAILABLE
-
-Reprocessed:
-    2030-01-09
-
-Decoder:
-    v4
-
-New derived fact:
-    ...
+Observation time: T1
+Original processing: DECODER_NOT_AVAILABLE
+Reprocessed time: T2
+New decoder/correlator/intelligence: ...
+New derived fact: ...
 ```
 
 Stronghold must not present a later derived fact as knowledge Stronghold possessed at the original observation time.
@@ -541,11 +467,10 @@ Material derived records should preserve, as applicable:
 source object identity
 derived-record generation
 decoder / correlator version
+Pathfinder interpretation/version where applicable
 processing time
 supersession relationship
 ```
-
-A later decoder may supersede an earlier interpretation without changing the source object.
 
 ### Targeted Reprocessing
 
@@ -557,15 +482,15 @@ Appliance ID
 VLAN
 segment range
 protocol / decoder family
+Pathfinder observable / Record ID
+intelligence generation/update
 ```
 
 Targeted reprocessing operations belong in the Hunter Processing Journal.
 
 ### Full Reprocessing and Derived Generations
 
-For significant decoder/schema changes, Stronghold should prefer building a new derived generation rather than leaving partially migrated current state.
-
-Conceptually:
+For significant decoder/schema/intelligence changes, Stronghold should prefer building a new derived generation rather than leaving partially migrated current state.
 
 ```text
 Derived Generation 17
@@ -583,13 +508,59 @@ retain / expire older derived generation by policy
 
 Exact generation mechanics remain implementation work.
 
+## Pathfinder Retrospective Matching
+
+Pathfinder integration is one of the primary uses of Net-Hunter's preserved historical truth.
+
+New intelligence can be applied to old history without changing what was originally observed.
+
+```text
+PATHFINDER UPDATE
+        ↓
+observable newly classified / associated
+        ↓
+NET-HUNTER
+        ↓
+historical search / correlation / reprocessing
+        ↓
+prior endpoints
+prior sessions / flows
+prior Stronghold decisions
+source PCAP references
+```
+
+Example:
+
+```text
+Pathfinder Record: PF-98471
+Current interpretation: known C2 infrastructure
+
+Net-Hunter historical result:
+    first Stronghold observation: 2026-07-11T03:17:22Z
+    endpoints: ...
+    sessions: ...
+    related PCAP: available
+```
+
+The result must state the distinction between original observation time and intelligence application time.
+
+```text
+observed in July
+!=
+known malicious in July
+
+retrospective match today
+!=
+historical real-time detection
+```
+
+A Pathfinder update may create a new derived correlation generation. It must never rewrite old FW decisions, old IDS findings, source journals, or authoritative PCAP as though Pathfinder's current knowledge existed then.
+
 ## Processing Failures Are Journaled
 
-If processing fails after authoritative ingest succeeds, the authoritative segment remains committed.
+If processing or Pathfinder enrichment fails after authoritative ingest succeeds, the authoritative segment remains committed.
 
-The Hunter Processing Journal records the processing outcome and retry history.
-
-Examples:
+Potential Hunter Processing Journal events include:
 
 ```text
 PROCESSING_STARTED
@@ -601,46 +572,28 @@ INDEX_BUILD_FAILED
 INDEX_BUILD_SUCCEEDED
 REPROCESSING_STARTED
 REPROCESSING_COMPLETED
+PATHFINDER_ENRICHMENT_STARTED
+PATHFINDER_ENRICHMENT_FAILED
+PATHFINDER_ENRICHMENT_COMPLETED
 ```
 
-Later success does not erase the earlier failure.
+Later success does not erase earlier failure.
 
 ## Record Processing Jail Boundary
 
-The Record Processing Jail may:
-
-```text
-READ authoritative PCAP
-READ authoritative/source journals
-WRITE derived records
-WRITE indexes
-WRITE processing metadata
-```
+The Record Processing Jail may read authoritative PCAP/source journals and write derived records, indexes, processing metadata, and Pathfinder-derived correlation state.
 
 It must not rewrite authoritative PCAP or source FW journal history.
 
-If normalized or intermediate representations are useful, they are derived artifacts with explicit lineage.
+Pathfinder credentials/trust, if exposed to a Hunter component, must be narrowly scoped and must not grant ZFS host, FW management, retention/destruction, or unrelated Stronghold authority.
 
 ## External UI Boundary
 
 The External UI Jail remains read-only with respect to authoritative Stronghold history and authoritative processing state.
 
-The UI may:
+The UI may search, filter, correlate, present timelines, pivot to packets, retrieve approved PCAP subsets, export, and create authorized notes/workspace artifacts.
 
-```text
-search
-filter
-correlate
-present timelines
-pivot to packets
-retrieve approved PCAP subsets
-export
-create authorized notes / workspace artifacts
-```
-
-It must not rewrite authoritative PCAP, source journals, or derived records merely to make an event appear corrected.
-
-User annotations remain separate user-supplied context.
+It may display Pathfinder enrichment with explicit provenance. It must not convert an analyst annotation or Pathfinder classification into rewritten Stronghold source history.
 
 ## Firewall Decision Correlation
 
@@ -652,48 +605,27 @@ PCAP observation
 Traffic Decision Journal
     +
 configuration generation
+    +
+Access / endpoint context where available
+    +
+Pathfinder intelligence where available
 ```
 
-so the operator can answer:
+so the operator can answer what packet/session was observed, which rule matched, what exact rule content existed, what authorization occurred, route/WAN/NAT behavior, final disposition, NOT_PERFORMED work, endpoint/Access context, and what intelligence was later or contemporaneously associated.
 
-```text
-What packet/session was observed?
-Which rule matched?
-What exact rule content existed at that generation?
-What authorization result occurred?
-Was routing performed?
-Which route was selected?
-Which WAN was selected?
-What NAT occurred?
-What was the final disposition?
-What processing was NOT_PERFORMED?
-```
-
-Historical queries use the configuration generation that was active for the decision, not merely today's configuration with the same Policy ID.
-
-## Historical Configuration Correlation
-
-The isolated FW Configuration Backup Jail preserves committed configuration generations for recovery and historical reconstruction.
-
-Net-Hunter should be able to correlate a decision referencing generation `N` with policy/routes/NAT/WAN objects as they actually existed in generation `N`.
-
-```text
-Policy ID stable identity
-!=
-current policy content
-```
+Historical queries use the configuration generation that was active for the decision, not today's configuration with the same Policy ID.
 
 ## Timeline Views Are Derived
 
-Net-Hunter may create correlated timelines across journals, configuration operations, HA transitions, path changes, and packet/flow activity.
-
-A timeline is a presentation/index structure whose entries retain references to authoritative sources.
+Net-Hunter may create correlated timelines across journals, configuration operations, HA transitions, path changes, Access/Agent state, Pathfinder intelligence events, and packet/flow activity.
 
 ```text
 timeline presentation
 !=
 authoritative journal
 ```
+
+A timeline entry preserves references to its authoritative and external sources.
 
 ## Search Result State and Confidence
 
@@ -706,9 +638,11 @@ derived decoder / generation
 index completeness
 clock confidence
 provenance type
+Pathfinder Record ID / interpretation generation
+Pathfinder data freshness
 ```
 
-Stronghold must not flatten degraded, partial, indirect, or unknown states into a generic successful result.
+Stronghold must not flatten degraded, partial, indirect, external, stale, or unknown states into a generic successful result.
 
 ## Backlog Dimensions
 
@@ -716,26 +650,18 @@ Net-Hunter should distinguish separate backlog categories:
 
 ```text
 TRANSFER BACKLOG
-    history still waiting on FW
-
 INGEST BACKLOG
-    received but not durably committed/verified
-
 PROCESSING BACKLOG
-    committed source history not yet decoded/indexed
-
 REPROCESSING BACKLOG
-    scheduled historical reinterpretation
-
 INDEX REBUILD BACKLOG
-    derived index rebuild work
+PATHFINDER ENRICHMENT / SYNC BACKLOG
 ```
 
 A generic undifferentiated backlog number is insufficient.
 
 ## Resource Priorities
 
-Net-Hunter is not inline, but current history preservation still outranks historical reinterpretation.
+Net-Hunter is not inline, but current history preservation still outranks historical reinterpretation and enrichment.
 
 Conceptual priority direction:
 
@@ -746,23 +672,19 @@ Conceptual priority direction:
 4. current/recent derived processing and indexing
 5. interactive hunt/query
 6. historical reprocessing
-7. deeper optional enrichment
+7. Pathfinder / other optional enrichment
 ```
 
-Exact scheduling remains implementation work.
-
-Historical reprocessing must not starve current ingest or undermine authoritative preservation.
+Historical reprocessing or intelligence enrichment must not starve current ingest or undermine authoritative preservation.
 
 ## PCAP Pivot Invariant
 
 > **Where authoritative packet history still exists, a traffic-derived Hunter result should retain enough lineage to locate the packet segment or segments from which it was derived.**
 
-Exact packet offsets are not necessarily required in the first implementation, but the architecture must preserve sufficient source references to move from a derived result back toward authoritative PCAP.
-
-Conceptually:
+This includes Pathfinder-enriched results.
 
 ```text
-Flow / protocol / decision result
+Pathfinder / flow / protocol / decision result
         ↓
 source references
         ↓
@@ -775,16 +697,7 @@ packet/time range
 
 A PCAP export produced from a hunt is a derived extract, even when it contains exact source bytes.
 
-Export metadata should preserve as applicable:
-
-```text
-source segment IDs
-source Appliance ID
-selected time / filters
-export generation time
-exporting user / authority
-integrity information
-```
+Export metadata should preserve, as applicable, source segment IDs, source Appliance ID, selected time/filters, export generation time, exporting user/authority, integrity information, and Pathfinder Record references if intelligence was part of the selection criteria.
 
 ```text
 exported PCAP
@@ -803,6 +716,8 @@ NO_MATCH_IN_COMPLETE_INDEX
 INDEX_INCOMPLETE
 PROCESSING_PENDING
 DECODER_NOT_AVAILABLE
+PATHFINDER_ENRICHMENT_PENDING
+PATHFINDER_UNAVAILABLE_OR_STALE
 SOURCE_HISTORY_UNAVAILABLE
 SOURCE_HISTORY_DESTROYED
 CAPTURE_GAP
@@ -810,72 +725,44 @@ CAPTURE_GAP
 
 Exact names remain future contract work, but the semantic distinction is mandatory.
 
-This protects the product from the failure mode where an operator is told that something did not happen merely because one software version, parser, index, or processing stage did not record it.
-
 ## Hard Invariants
 
-> **Authoritative PCAP and source journals remain the source of truth. Derived records and indexes exist to locate, correlate, explain, and efficiently interrogate that history.**
+> **Authoritative PCAP and source journals remain the Stronghold source of truth. Derived records and indexes exist to locate, correlate, explain, enrich, and efficiently interrogate that history.**
 
 > **Derived databases/indexes are rebuildable and must never become the only copy of a historical fact that Stronghold claims came from packet observation.**
 
-> **Every material derived traffic fact retains provenance sufficient to identify the source appliance, source history object, processing generation/decoder, and relevant authoritative packet/journal lineage.**
+> **Every material derived traffic fact retains provenance sufficient to identify the source appliance, source history object, processing generation/decoder, relevant authoritative packet/journal lineage, and any external intelligence record used.**
 
 > **Reprocessing creates new or superseding derived interpretation without changing the original observation or falsely representing later understanding as knowledge Stronghold possessed at the original event time.**
 
-> **Search coverage is explicit. An incomplete or rebuilding index must not produce an unqualified `no results` answer.**
+> **Search coverage is explicit. An incomplete or rebuilding index or intelligence-enrichment state must not produce an unqualified `no results` answer.**
 
 > **Where authoritative packet content remains retained, traffic-derived results should support a pivot back toward the applicable PCAP source.**
 
 ## Truth Separations
 
-Stronghold preserves these distinctions:
-
 ```text
-database record
-!=
-authoritative packet
-
-no indexed result
-!=
-no traffic
-
-index unavailable
-!=
-history unavailable
-
-reprocessing result
-!=
-original knowledge
-
-timeline
-!=
-authoritative journal
-
-exported PCAP
-!=
-original PCAP segment
-
-current hostname association
-!=
-historical hostname association
-
-direct observation
-!=
-correlated association
-
-processing failed
-!=
-source history lost
-
-source history available
-!=
-index complete
+database record                 != authoritative packet
+no indexed result               != no traffic
+index unavailable               != history unavailable
+reprocessing result             != original knowledge
+timeline                        != authoritative journal
+exported PCAP                   != original PCAP segment
+current hostname association    != historical hostname association
+direct observation              != correlated association
+processing failed               != source history lost
+source history available        != index complete
+Pathfinder record exists        != observable malicious
+Pathfinder match                != IDS detection
+Pathfinder enrichment           != original Stronghold knowledge
+retrospective match             != historical real-time detection
+Pathfinder unavailable          != observable trusted
 ```
 
 ## Scope
 
 This architecture is intentionally later than Phase 0.
 
-Phase 0 remains the Traffic Observation Foundation and does not implement the complete Net-Hunter record/index/search/reprocessing system merely because this contract exists.
+Phase 0 remains the Traffic Observation Foundation and does not implement the complete Net-Hunter record/index/search/reprocessing or Pathfinder-enrichment system merely because this contract exists.
 
-The eventual database/index technology, physical schemas, partitioning strategy, exact Flow ID contract, decoder framework, query language, and UI/API representation remain future implementation decisions subject to measurement and explicit approval.
+The eventual database/index technology, physical schemas, partitioning strategy, exact Flow ID contract, decoder framework, query language, Pathfinder correlation schema, and UI/API representation remain future implementation decisions subject to measurement and explicit approval.
