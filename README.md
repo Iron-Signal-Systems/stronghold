@@ -21,17 +21,23 @@ Stronghold Access
     third Stronghold infrastructure node
     supported server or VM on the customer's network
     access-control / identity / authorization coordination
+    synchronized endpoint-policy distribution / convergence
 
 Stronghold Agent
     endpoint component / endpoint Policy Enforcement Point
     managed through Stronghold Access
+    enforces the endpoint-applicable projection of finalized Stronghold policy
 ```
 
 The components cooperate through explicit authenticated/versioned Stronghold contracts. They are intentionally separate implementations and failure domains, but they operate as one Stronghold system.
 
 > **Tightly coupled platform does not mean monolithic software.**
 
-See [`docs/PROJECT-BOUNDARIES.md`](docs/PROJECT-BOUNDARIES.md).
+Stronghold uses one governed policy authority with multiple enforcement projections. Stronghold Access coordinates the device-specific policy projection delivered to managed Agents so that known-denied endpoint traffic can be rejected before it becomes network traffic, while Stronghold FW independently enforces traffic that is actually presented to it.
+
+A managed endpoint continues to enforce its active endpoint policy when it leaves the organization's network, subject to explicit policy-generation, lease, holdover, expiration, and revocation semantics.
+
+See [`docs/PROJECT-BOUNDARIES.md`](docs/PROJECT-BOUNDARIES.md) and [`docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`](docs/DISTRIBUTED-POLICY-ENFORCEMENT.md).
 
 ```text
 OBSERVE
@@ -67,6 +73,10 @@ Observation survives interpretation. A packet Stronghold cannot decode today rem
 > **Capture first. Never sacrifice observation for secondary work.**
 
 > **Denied traffic should be cheap to reject, but never invisible.**
+
+> **Where a managed Agent can definitively deny from its active Stronghold policy, reject before transmission rather than intentionally send garbage to the FW merely to deny it again.**
+
+> **An endpoint-local DENY must be reported as an endpoint decision, never fabricated as a Stronghold FW observation or FW denial.**
 
 > **Path availability is not path permission.**
 
@@ -117,7 +127,11 @@ tunnel established                 != resource authorized
 RADIUS Access-Accept               != Stronghold Access GRANT
 endpoint ALLOW                     != FW ALLOW
 endpoint DENY                      != FW observed DENY
+endpoint DENY                      != packet transmitted
+endpoint attempt reported          != FW observed packet
 device on VLAN                     != device authorized for VLAN/zone
+Agent policy projection            != complete FW configuration
+policy generation finalized        != every Agent synchronized
 policy received                    != policy activated
 policy activated                   != endpoint enforcement healthy
 Pathfinder match                   != Stronghold enforcement action
@@ -276,6 +290,8 @@ Stronghold Access Sessions
 resource-scoped authorization
 revocation / reevaluation
 policy distribution to Stronghold Agent
+endpoint policy-generation synchronization
+Agent check-in / fleet convergence state
 controlled Stronghold FW integration
 future Pathfinder risk/intelligence inputs
 ```
@@ -283,20 +299,35 @@ future Pathfinder risk/intelligence inputs
 The intended relationship is tightly coupled but authority-preserving:
 
 ```text
-network admission / FW context
-        ↓
+FINALIZED STRONGHOLD POLICY GENERATION
+        │
+        ├──────────────► Stronghold FW network projection / PEP
+        │
+        ▼
 Stronghold Access
-        ↓
-signed / authenticated policy and Access Session state
-        ├──────────────► Stronghold Agent endpoint PEP
-        └──────────────► Stronghold FW network PEP context
+        │
+        │ device-specific signed endpoint projection
+        ▼
+Stronghold Agent endpoint PEP
+```
+
+A newly finalized generation should be made available promptly to connected Agents. If an Agent misses the update because it is offline, asleep, or disconnected, the next authenticated check-in compares the Agent's active generation with the currently required generation and delivers the applicable update when needed.
+
+```text
+policy finalized
+!=
+every Agent synchronized
+
+policy sent
+!=
+policy activated
 ```
 
 Remote zero-trust access follows the NIST SP 800-207 PE/PA/PEP direction with WireGuard as the secure transport/data plane. WireGuard does not become the authorization system.
 
 Site-to-site / branch-office tunneling is a separate architecture using L2TPv3 protected by IPsec and normal Stronghold policy around the tunnel.
 
-See [`docs/access/ARCHITECTURE.md`](docs/access/ARCHITECTURE.md) and [`docs/SECURE-ACCESS.md`](docs/SECURE-ACCESS.md).
+See [`docs/access/ARCHITECTURE.md`](docs/access/ARCHITECTURE.md), [`docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`](docs/DISTRIBUTED-POLICY-ENFORCEMENT.md), and [`docs/SECURE-ACCESS.md`](docs/SECURE-ACCESS.md).
 
 # Stronghold Agent
 
@@ -329,6 +360,66 @@ The Agent may reject unauthorized process/application connections locally before
 endpoint ALLOW != FW ALLOW
 endpoint DENY  != FW observed DENY
 ```
+
+## Synchronized Endpoint Policy and Off-Network Enforcement
+
+Stronghold Agent does not maintain an unrelated endpoint-firewall policy universe. It enforces the **endpoint-applicable projection of the finalized Stronghold policy generation** distributed and coordinated through Stronghold Access.
+
+For example:
+
+```text
+FINALIZED GENERATION 844
+
+Policy 798
+    Device:       FIN-PC-17
+    User:         DOMAIN\John
+    Application:  powershell.exe
+    Destination:  PAYROLL-DB
+    Service:      TCP/1433
+    Action:       DENY
+```
+
+On the endpoint:
+
+```text
+powershell.exe
+      │
+      │ attempts PAYROLL-DB:1433
+      ▼
+Stronghold Agent
+      │
+      │ Generation 844 / Policy 798
+      ▼
+    DENY
+      │
+      ├── endpoint decision reported
+      └── packet not transmitted
+```
+
+Stronghold FW does not need to spend dataplane resources denying traffic the managed Agent has already definitively rejected. The platform may show the endpoint denial in a unified operator view, but the event remains truthful:
+
+```text
+DENIED AT ENDPOINT
+Policy 798
+Packet presented to FW: NO
+```
+
+The active endpoint policy remains applicable when the managed device leaves the organization's network. Office LAN, home Wi-Fi, hotel Wi-Fi, or a mobile hotspot do not independently erase a Stronghold endpoint restriction.
+
+If a device misses a new generation, Stronghold Access detects the mismatch at a later authenticated check-in and supplies the required signed projection according to the defined synchronization/lease contract.
+
+The FW remains independently authoritative for traffic that does leave the endpoint:
+
+```text
+Agent DENY
+    -> do not transmit
+
+Agent ALLOW
+    -> connection may be attempted
+    -> FW still independently evaluates traffic actually presented to it
+```
+
+See [`docs/DISTRIBUTED-POLICY-ENFORCEMENT.md`](docs/DISTRIBUTED-POLICY-ENFORCEMENT.md).
 
 Network-side VLAN/zone context is stronger than endpoint self-assertion. An Agent cannot declare itself trusted because it reports a particular VLAN or network.
 
@@ -458,6 +549,8 @@ NEW GENERATION
 
 CLI, API, and future UI are clients of the same configuration and authorization machinery. Native OS state is implementation state below Stronghold, not a second configuration truth.
 
+A finalized generation may produce different enforcement projections for FW and managed Agents while remaining one governed policy authority. Finalization does not prove every Agent has synchronized; convergence state must remain explicit.
+
 Policy simulation/counterfactual testing is intended to show expected policy, route, NAT, WAN, session, secure-access, and later intelligence-driven impact before activation.
 
 See [`docs/CONFIGURATION-GOVERNANCE.md`](docs/CONFIGURATION-GOVERNANCE.md), [`docs/POLICY-SIMULATION.md`](docs/POLICY-SIMULATION.md), and [`docs/MANAGEMENT-PLANE.md`](docs/MANAGEMENT-PLANE.md).
@@ -519,7 +612,7 @@ local tier movement
 verified Net-Hunter history transfer
 ```
 
-Stronghold Access implementation, Agent endpoint enforcement, Pathfinder integration, IDS/IPS, HA, full firewall enforcement, and other later systems remain outside Phase 0 even where their architecture is already defined.
+Stronghold Access implementation, Agent endpoint enforcement, distributed policy synchronization, Pathfinder integration, IDS/IPS, HA, full firewall enforcement, and other later systems remain outside Phase 0 even where their architecture is already defined.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
