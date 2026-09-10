@@ -2,11 +2,13 @@
 
 ## Purpose
 
-This document records the integrated high-level architecture of the Stronghold platform. Focused subsystem documents govern their respective implementation details.
+This document records the integrated high-level architecture of the **Stronghold platform**. Focused subsystem documents govern their respective implementation details.
 
 > **Stronghold is an enforcement system that preserves the traffic presented to it before deciding what that traffic means or what should happen to it.**
 
-Stronghold is one platform with explicit product and implementation boundaries:
+Stronghold is **one tightly coupled security platform**, not a collection of unrelated products.
+
+The platform consists of three infrastructure components plus the endpoint Agent component:
 
 ```text
 Stronghold FW
@@ -16,13 +18,20 @@ Stronghold Net-Hunter
     historical preservation / processing / hunt appliance
 
 Stronghold Access
-    standalone or FW-integrated access-control system
+    third Stronghold infrastructure node
+    supported customer VM or bare-metal server
+    access-control / identity / authorization coordination
 
 Stronghold Agent
-    endpoint application / endpoint Policy Enforcement Point
+    endpoint component / endpoint Policy Enforcement Point
+    managed through Stronghold Access
 ```
 
-The product split is governed by `docs/PROJECT-BOUNDARIES.md`. Cooperation does not imply shared internal authority or one monolithic implementation.
+The component model is governed by `docs/PROJECT-BOUNDARIES.md`.
+
+> **Tightly coupled platform does not mean monolithic software.**
+
+Components communicate through explicit authenticated/versioned Stronghold contracts while retaining distinct implementation ownership, authority, failure domains, and qualification boundaries.
 
 ```text
 OBSERVE → RECORD → ENFORCE → REMEMBER → HUNT
@@ -30,7 +39,9 @@ OBSERVE → RECORD → ENFORCE → REMEMBER → HUNT
 
 > **Observe the truth. Preserve the history. Explain the decision.**
 
-## Truth Model
+# Truth Model
+
+Stronghold separates three categories of truth:
 
 ```text
 WHAT WAS PRESENTED
@@ -40,16 +51,26 @@ WHAT STRONGHOLD DID
     authoritative operational and decision journals
 
 WHAT STRONGHOLD UNDERSTOOD
-    derived interpretation, correlation, and enrichment
+    derived interpretation, correlation, enrichment, and intelligence context
 ```
 
-### Observation survives interpretation
+## Observation Survives Interpretation
 
-If Stronghold preserves a frame that it cannot decode today, that packet remains authoritative history. Later decoders or correlation may create new derived interpretation without rewriting the source observation.
+If Stronghold preserves a frame it cannot decode or classify today, that packet remains authoritative history. Later decoders, Net-Hunter reprocessing, IDS findings, or Pathfinder intelligence may create new derived interpretation without rewriting the original observation.
+
+```text
+observed then
+!=
+interpreted then
+
+historically derivable now
+!=
+known then
+```
 
 Missing interpretation must never erase observation, and missing history must never be presented as proof of absence.
 
-## Governing Principles
+# Governing Principles
 
 > **Capture first. Never sacrifice observation for secondary work.**
 
@@ -73,67 +94,103 @@ Missing interpretation must never erase observation, and missing history must ne
 
 > **Record what the system can actually establish, preserve the source of that truth, and never manufacture certainty beyond it.**
 
-## Common Truth Boundaries
+# Common Truth Boundaries
 
 ```text
-route available                    != route authorized
-certificate valid                  != peer authorized
-packet not decoded                 != packet not observed
-no journal record                  != event did not occur
-timestamp precision                != timestamp accuracy
-policy allowed                     != forwarding succeeded
-object expired                     != destruction authorized
-bytes received                     != history durably committed
-archived                           != destroyed
-new interpretation                 != new historical observation
-forwarding HA succeeded            != capture continuity guaranteed
-virtual cluster identity           != physical capture identity
-software installed                 != Stronghold update validated
-configuration restored             != appliance validated
-backup written                     != backup proven restorable
-ZFS redundancy                     != disaster recovery
-disk encrypted                     != secrets safely designed
-TPM protected                      != disaster recoverable
-entry written                      != journal entry durably committed
-signed journal checkpoint          != physically immutable storage
-system booted                      != approved system state
-hardware detected                  != hardware supported
-link speed                         != validated dataplane rate
-capture throughput                 != full-feature firewall throughput
-storage capacity                   != sustainable ingest capacity
-AF_XDP available                   != AF_XDP zero-copy available
-AF_XDP zero-copy available         != Stronghold zero-copy qualified
-WireGuard peer authenticated       != user authenticated
-tunnel established                != resource authorized
-802.1X authenticated               != resource authorized
-RADIUS Access-Accept               != Stronghold Access GRANT
-endpoint ALLOW                     != FW ALLOW
-endpoint DENY                      != FW observed DENY
-device on VLAN                     != device authorized for VLAN/zone
-policy received                    != policy activated
-policy activated                   != endpoint enforcement healthy
-L2TPv3 tunnel established          != site authorized
-IPsec SA established               != traffic authorized
+route available                     != route authorized
+certificate valid                   != peer authorized
+packet not decoded                  != packet not observed
+no journal record                   != event did not occur
+timestamp precision                 != timestamp accuracy
+policy allowed                      != forwarding succeeded
+object expired                      != destruction authorized
+bytes received                      != history durably committed
+archived                            != destroyed
+new interpretation                  != new historical observation
+forwarding HA succeeded             != capture continuity guaranteed
+virtual cluster identity            != physical capture identity
+software installed                  != Stronghold update validated
+configuration restored              != appliance validated
+backup written                      != backup proven restorable
+ZFS redundancy                      != disaster recovery
+disk encrypted                      != secrets safely designed
+TPM protected                       != disaster recoverable
+entry written                       != journal entry durably committed
+signed journal checkpoint           != physically immutable storage
+system booted                       != approved system state
+hardware detected                   != hardware supported
+link speed                          != validated dataplane rate
+capture throughput                  != full-feature firewall throughput
+storage capacity                    != sustainable ingest capacity
+AF_XDP available                    != AF_XDP zero-copy available
+AF_XDP zero-copy available          != Stronghold zero-copy qualified
+WireGuard peer authenticated        != user authenticated
+tunnel established                 != resource authorized
+802.1X authenticated                != resource authorized
+RADIUS Access-Accept                != Stronghold Access GRANT
+endpoint ALLOW                      != FW ALLOW
+endpoint DENY                       != FW observed DENY
+device on VLAN                      != device authorized for VLAN/zone
+policy received                     != policy activated
+policy activated                    != endpoint enforcement healthy
+L2TPv3 tunnel established           != site authorized
+IPsec SA established                != traffic authorized
+Pathfinder record exists            != observable malicious
+Pathfinder malicious classification != compromise proven
+Pathfinder confidence HIGH          != Stronghold action authorized
+Pathfinder match                    != IDS detection
+new Pathfinder interpretation       != original historical knowledge
 ```
+
+# Integrated Platform Topology
+
+```text
+                              PATHFINDER
+                       ISS threat intelligence
+                              authority
+                                 |
+                     authenticated/versioned
+                       intelligence exchange
+                                 |
+         +-----------------------+-----------------------+
+         |                       |                       |
+         v                       v                       v
++------------------+    +-------------------+    +----------------------+
+| STRONGHOLD ACCESS|    |   STRONGHOLD FW   |    | STRONGHOLD NET-HUNTER|
+| Server / VM      |<-->| Physical Appliance|--->| Physical Appliance   |
+| PE / PA          |    | AF_XDP + PEP      |    | History / Hunt       |
+| 802.1X / AAA     |    | Capture / FW      |    | Reprocess / IDS      |
++---------+--------+    +---------+---------+    +----------------------+
+          |                       ^
+          | signed policy         |
+          v                       | normal or WireGuard traffic
+ +------------------+             |
+ | STRONGHOLD AGENT |-------------+
+ | Windows endpoint |
+ | Go + WFP PEP     |
+ +------------------+
+```
+
+Pathfinder is not a Stronghold component. It is a separate ISS threat-intelligence system that may enrich the Stronghold environment through a controlled first-class integration.
 
 # Stronghold FW
 
 ## Platform Direction
 
 ```text
-Platform:          Arch Linux
-Architecture:      x86_64
-Administration:    CLI first
-NICs:              qualified physical PCIe Ethernet
+Platform:           Arch Linux
+Architecture:       x86_64
+Administration:     CLI first
+NICs:               qualified physical PCIe Ethernet
 Packet acquisition: AF_XDP
-Capture format:    PCAPNG
-Enforcement:       nftables/netfilter direction
-OS storage:        dedicated SSD / Btrfs direction
-HOT capture:       NVMe / XFS direction
-WARM/backlog:      SSD / XFS direction
-1 GbE:             current qualification target
-10 GbE:            primary production target
-40 GbE:            future target only
+Capture format:     PCAPNG
+Enforcement:        nftables/netfilter direction
+OS storage:         dedicated SSD / Btrfs direction
+HOT capture:        NVMe / XFS direction
+WARM/backlog:       SSD / XFS direction
+1 GbE:              current qualification target
+10 GbE:             primary production target
+40 GbE:             future target only
 ```
 
 `docs/AF-XDP.md` governs the packet-acquisition architecture.
@@ -185,25 +242,43 @@ EARLY AUTHORIZATION
 
 A route lookup may establish facts but never grants permission. NAT never grants permission. WAN availability never grants permission.
 
-## Standalone FW and Local Working History
+## Local Working History
 
-Stronghold FW is intended to remain operational and useful without Net-Hunter.
-
-The local storage/history model has two jobs:
+Stronghold FW remains operational and useful without Net-Hunter or while Hunter is unavailable.
 
 ```text
 OPERATOR WORKING SET
     approximately 30–60 minutes
-    near-real-time recent traffic and decision visibility
+    near-real-time traffic / policy / route / NAT / WAN visibility
 
 HUNTER OUTAGE BUFFER
     approximately 4 hours without Hunter is CRITICAL
     qualified physical capacity direction: roughly 8 hours equivalent ingest
 ```
 
-The administrator should be able to validate policy, routing, NAT, WAN selection, and actual forwarding outcome locally without waiting for Hunter ingestion or indexing.
+The administrator should be able to determine what the FW is doing now without waiting for Hunter indexing.
 
 Backlog recovery is subordinate to live observation. Catch-up must not starve current packet acquisition or active PCAP writes.
+
+## Pathfinder Context on FW
+
+Stronghold FW may display or consume approved Pathfinder-derived intelligence alongside recent traffic and policy facts.
+
+The distinction is explicit:
+
+```text
+STRONGHOLD
+    what was observed
+    what policy matched
+    what route/WAN/NAT was selected
+    what action actually occurred
+
+PATHFINDER
+    what an observable is currently interpreted to represent
+    confidence / source / campaign / relationship context
+```
+
+Pathfinder context may later be an explicit Stronghold policy input, but Pathfinder itself does not directly command the dataplane.
 
 # Stronghold Journals and External Export
 
@@ -218,7 +293,7 @@ Time / Clock
 Hunter Processing
 ```
 
-Source journals are Stronghold authority. External SIEM/log systems receive copies/projections and do not replace the authoritative source.
+Source journals remain Stronghold authority. External systems receive copies/projections and do not replace the authoritative source.
 
 ```text
 Stronghold FW Journals
@@ -241,7 +316,7 @@ SIEM export gap           != Stronghold journal gap
 
 # Stronghold Net-Hunter
 
-Net-Hunter is the historical system for long-term Stronghold packet and operational history.
+Net-Hunter is the historical Stronghold appliance.
 
 ```text
 Stronghold FW
@@ -261,7 +336,7 @@ Net-Hunter
     export
 ```
 
-Net-Hunter is optional for basic FW operation. It is what provides long-duration packet history, deep historical search, reprocessing, configuration backup, and forensic reconstruction.
+Net-Hunter provides long-duration packet history, deep historical search, reprocessing, configuration backup, and forensic reconstruction.
 
 Defined application jails:
 
@@ -275,13 +350,37 @@ The FreeBSD host owns ZFS, raw storage/HBA authority, host networking, jail life
 
 Derived records/indexes are rebuildable. They must never become the sole proof that authoritative traffic existed.
 
-`docs/NET-HUNTER-RECORDS.md` governs Hunter records/search/reprocessing.
+## Pathfinder Retrospective Enrichment
+
+New Pathfinder intelligence can be applied to old Net-Hunter history.
+
+```text
+new Pathfinder interpretation
+        ↓
+observable / relationship updated
+        ↓
+Net-Hunter historical matching / reprocessing
+        ↓
+prior endpoints / sessions / flows / PCAP references
+```
+
+This is one of the major reasons to preserve authoritative source history independently of current interpretation.
+
+```text
+retrospective match
+!=
+historical real-time detection
+```
+
+`docs/NET-HUNTER-RECORDS.md` governs Hunter records/search/reprocessing and `docs/PATHFINDER-INTEGRATION.md` governs Pathfinder lineage.
 
 # Stronghold Access
 
-Stronghold Access is the access-control/control-framework product. It may be deployed on a qualified customer VM or bare-metal system and may operate without Stronghold FW.
+Stronghold Access is the **third Stronghold infrastructure component** when deployed.
 
-It owns access-control responsibilities including:
+It runs on a supported customer VM or supported bare-metal server on the customer's network rather than inside the high-PPS FW dataplane.
+
+It owns:
 
 ```text
 identity inputs
@@ -294,6 +393,7 @@ resource-scoped authorization
 revocation / reevaluation
 Agent policy/session distribution
 controlled FW integration
+optional Pathfinder intelligence / risk inputs
 ```
 
 Stronghold Access does not own FW packet capture, routing, NAT, physical observation, or FW Traffic Decision Journal authority.
@@ -302,9 +402,7 @@ Stronghold Access does not own FW packet capture, routing, NAT, physical observa
 
 ## 802.1X as a First-Class Control
 
-802.1X is a first-class access-control primitive, not an afterthought.
-
-Stronghold preserves:
+802.1X is a first-class Stronghold security primitive, not an afterthought.
 
 ```text
 network admission
@@ -312,13 +410,11 @@ network admission
 resource authorization
 ```
 
-EAP-TLS is an important high-assurance direction where supported. MAB may be necessary for legacy/non-supplicant devices but is not represented as equivalent assurance to authenticated 802.1X.
+EAP-TLS is an important high-assurance direction where supported. MAB may be necessary for legacy/non-supplicant devices but is not equivalent assurance to authenticated 802.1X.
 
-External AAA such as NPS, ISE, ClearPass, FreeRADIUS, or other qualified RADIUS systems may provide identity/authorization attributes, but those attributes remain inputs to Stronghold Access policy rather than hidden authorization bypasses.
+External AAA may provide identity/authorization attributes, but those attributes remain inputs to Stronghold Access policy rather than hidden authorization bypasses.
 
-## Network Context Distribution
-
-When FW and Access are integrated, the FW may provide network-side context that the endpoint cannot authoritatively self-assert.
+## Network Context and Agent Policy Distribution
 
 ```text
 Stronghold FW / network admission
@@ -335,11 +431,25 @@ Stronghold Agent
     verifies / validates / programs WFP
 ```
 
-The control path is generation-based and authenticated. It is not a per-packet command stream from FW to Agent.
+The Agent cannot self-promote into a trusted VLAN/zone merely by reporting local state.
+
+## Pathfinder Risk / Trust Input
+
+Pathfinder may provide an intelligence/risk input to Stronghold Access reevaluation.
+
+Potential policy outcomes may later include MFA reauthentication, narrower resource scope, shorter authorization leases, Access Session revocation, or network-admission reevaluation.
+
+```text
+Pathfinder risk signal
+!=
+automatic Access Session revocation
+```
+
+Stronghold Access remains the authority over the actual authorization result.
 
 # Stronghold Agent
 
-Stronghold Agent is the endpoint application and endpoint Policy Enforcement Point. Windows is the initial platform direction.
+Stronghold Agent is the endpoint component of Stronghold and the endpoint Policy Enforcement Point. Windows is the initial platform direction.
 
 ```text
 Stronghold Agent
@@ -363,7 +473,7 @@ process attempts connection
         │
         ▼
 Stronghold Agent / WFP
-    ├── DENY → local endpoint record
+    ├── DENY → endpoint decision record
     └── ALLOW
             │
             ▼
@@ -373,28 +483,28 @@ Stronghold Agent / WFP
        Stronghold FW
             │
             ▼
-       independent policy
+       independent FW policy
 ```
 
 Endpoint ALLOW cannot force FW ALLOW. Endpoint DENY is not represented as a FW denial if traffic never reached the FW.
 
 `docs/agent/ARCHITECTURE.md` is the authoritative Agent architecture.
 
-## Endpoint Layer-7 Boundary
+## Agent / Pathfinder Boundary
 
-The initial Windows Agent uses application/process identity as an authorization fact. That is not the same thing as general deep-payload inspection.
+Stronghold Agent normally does not query Pathfinder directly.
 
 ```text
-originating process identified
-!=
-payload decoded
-
-application-aware connection policy
-!=
-deep Layer-7 payload inspection
+Pathfinder
+    ↓
+Stronghold Access policy evaluation
+    ↓
+signed Stronghold Agent policy
+    ↓
+Stronghold Agent
 ```
 
-A future local proxy or kernel-mode WFP callout-driver design requires separate qualification for protocol coverage, TLS behavior, driver signing, kernel attack surface, crash/BSOD risk, upgrade compatibility, performance, privacy, retention, and failure behavior.
+The endpoint receives the authorized Stronghold policy result rather than becoming an independent threat-intelligence consumer.
 
 # Secure Access
 
@@ -431,8 +541,6 @@ tunnel established            != resource authorized
 
 ## Site-to-Site / Branch Office
 
-Site-to-site / branch-office tunneling is a separate architecture:
-
 ```text
 L2TPv3 tunnel
     ↓
@@ -447,7 +555,69 @@ normal Stronghold policy
 
 Tunnel establishment and IPsec SA state never independently grant traffic authorization.
 
-`docs/SECURE-ACCESS.md` retains the earlier detailed secure-access model; where product ownership differs, `docs/PROJECT-BOUNDARIES.md`, `docs/access/ARCHITECTURE.md`, and `docs/agent/ARCHITECTURE.md` take precedence.
+`docs/SECURE-ACCESS.md` retains detailed secure-access concepts; where component ownership differs, `docs/PROJECT-BOUNDARIES.md`, `docs/access/ARCHITECTURE.md`, and `docs/agent/ARCHITECTURE.md` take precedence.
+
+# IDS / TLS Inspection
+
+IDS/TLS inspection is architecture-defined but implementation-deferred.
+
+Stronghold FW retains authoritative encrypted-wire PCAP. Where inspection is explicitly selected, plaintext exists only in controlled volatile processing on the FW and is transported over a separate authenticated encrypted INSPECTION path to the isolated Hunter IDS/Inspection Jail.
+
+Stronghold FW never intentionally persists decrypted inspection payload at rest.
+
+## Pathfinder Complement
+
+Pathfinder complements IDS/IPS rather than replacing the detector or ruleset.
+
+```text
+Stronghold observation
+        ↓
+IDS detection
+        ├───────────────┐
+        │               │
+        ▼               ▼
+content/protocol     Pathfinder intelligence
+        │               │
+        └───────┬───────┘
+                ▼
+        Stronghold correlation
+```
+
+A suspicious protocol/content result may become more actionable when combined with Pathfinder classification, confidence, infrastructure/campaign relationships, certificate/hash context, or historical intelligence.
+
+```text
+IDS finding + Pathfinder match
+!=
+automatic IPS authority
+```
+
+Any IPS action remains a Stronghold policy decision and must record the actual enforcement result.
+
+`docs/IDS-INSPECTION.md` governs the inspection boundary and `docs/PATHFINDER-INTEGRATION.md` governs intelligence authority.
+
+# Pathfinder Integration
+
+Pathfinder is a separate ISS system and threat-intelligence authority.
+
+> **Pathfinder owns the organization's record and interpretation of threat intelligence. Stronghold owns observation, access/enforcement decisions, operational history, and the actions performed in the Stronghold environment.**
+
+Stronghold may consume Pathfinder intelligence for:
+
+```text
+FW recent traffic / operator enrichment
+explicit future policy inputs
+IDS/IPS context
+Net-Hunter retrospective matching / reprocessing
+Stronghold Access risk / trust evaluation
+```
+
+Stronghold may also submit qualified observables and relationships to Pathfinder for independent interpretation.
+
+Neither system rewrites the other's source truth.
+
+Pathfinder is not required for basic AF_XDP capture, ordinary FW forwarding, local journal commit, Hunter history ingest, valid Agent WFP enforcement, or ordinary Access operation unless a customer deliberately configures a policy requiring fresh Pathfinder context.
+
+`docs/PATHFINDER-INTEGRATION.md` governs this relationship.
 
 # Configuration and Management
 
@@ -471,7 +641,7 @@ NEW MONOTONIC GENERATION
 
 CLI, API, and future UI do not maintain separate configuration truth. Native Linux/FreeBSD/WireGuard/L2TPv3/IPsec/WFP state remains implementation state below Stronghold and must not become a hidden second configuration authority.
 
-Policy simulation/counterfactual testing is intended to let administrators evaluate expected policy, route, NAT, WAN, and session impact before commit.
+Policy simulation/counterfactual testing is intended to let administrators evaluate expected policy, route, NAT, WAN, session, secure-access, and later intelligence-driven impact before commit.
 
 Governing documents:
 
@@ -532,7 +702,7 @@ A successful package install or boot is not sufficient update validation. Signed
 
 FW storage direction uses encrypted block devices beneath Btrfs/XFS. Hunter favors purpose-separated ZFS-native encrypted datasets. TPM/HSM mechanisms may protect normal key use but must not become the sole recovery path for authoritative history.
 
-Secure Boot, measured boot, and attestation remain separate facts. Development, qualified, and supported hardware remain distinct states.
+Secure Boot, measured boot, and attestation remain separate facts. Development, qualification, and supported hardware remain distinct states.
 
 # Hardware and Performance Qualification
 
@@ -543,42 +713,18 @@ Qualification binds relevant combinations of:
 ```text
 Stronghold release
 CPU / architecture
-RAM / ECC requirements
-NIC model / driver / firmware
-AF_XDP / XDP operating mode
+RAM / ECC requirement
+NIC / driver / firmware
+AF_XDP mode
 queue / RSS / UMEM configuration
 PCIe / NUMA topology
 storage
-platform trust state
-enabled feature set
+feature profile
 ```
 
-Performance claims include both throughput and PPS. The 64-byte/high-PPS case is a required stress dimension, not just large-frame bandwidth testing.
+Performance testing includes Gbps and PPS, representative packet sizes, bidirectional traffic, flow counts, sustained duration, storage contention, and truthful loss accounting.
 
-Capture-only throughput is not reused as a full-feature firewall, HA, inspection, or secure-access claim.
-
-# IDS / TLS Inspection
-
-Future TLS/application inspection is architecture-defined but implementation-deferred.
-
-Authoritative original encrypted-wire PCAP remains the packet-history authority. Where inspection is explicitly selected, decrypted payload exists only in controlled volatile processing on FW and is transported over a purpose-specific mutually authenticated encrypted INSPECTION path to the future Hunter IDS/Inspection Jail.
-
-Stronghold FW never intentionally persists decrypted inspection payload at rest.
-
-`docs/IDS-INSPECTION.md` governs future inspection architecture.
-
-# Observability and Support
-
-Health is domain-specific. A healthy interface/process does not prove capture, durability, forwarding, journal, Hunter, Access, Agent, secure-access, or inspection health.
-
-External syslog/SNMP/API systems consume Stronghold state but do not become authority for it.
-
-Stronghold has no permanent vendor backdoor. Support collection, remote support, engineering access, and vendor BMC/OOB access remain separately controlled and attributable.
-
-Governing documents:
-
-- `docs/OBSERVABILITY.md`
-- `docs/SUPPORT-DIAGNOSTICS.md`
+The 64-byte packet case is a first-class stress profile; a clean large-frame throughput result is not enough.
 
 # Resource Priority
 
@@ -589,65 +735,83 @@ On Stronghold FW:
 2. active PCAP writes
 3. segment finalization / minimum integrity
 4. essential observation / decision / journal append
-5. HA heartbeat/control reserved lightweight capacity
+5. HA heartbeat/control reserved capacity
 6. journal checkpoint/finalization
 7. local tier movement / backlog
 8. HA bulk state synchronization
 9. authoritative Net-Hunter HISTORY transfer
 10. compression where approved
-11. deeper analytics / observability / support / IDS / secure-access housekeeping
+11. IDS / Pathfinder / analytics / observability / support / Access housekeeping
 ```
 
-Backlog recovery, journal export, analytics, support work, IDS, and control-plane housekeeping may lag or throttle before live capture is sacrificed.
+Secondary work may degrade or lag. It must not silently win over authoritative live observation.
 
-# Implementation Boundaries
+Pathfinder lookup is not an excuse to introduce an unbounded synchronous per-packet dependency on the FW dataplane.
 
-Stronghold Access implementation belongs under:
+# Current Implementation Scope
+
+Implementation begins with **Phase 0 — Traffic Observation Foundation** using AF_XDP.
+
+Phase 0 proves:
 
 ```text
-go/access/
+capture segment contract
+traffic / segment catalog contract
+PCAPNG metadata contract
+local storage contract
+capture resource protection
+single-interface AF_XDP capture
+multi-interface / multi-queue AF_XDP capture
+PPS / loss / visibility / hardware qualification baseline
+local tier movement
+verified Net-Hunter history transfer
 ```
 
-Stronghold Agent implementation belongs under:
-
-```text
-go/agent/
-```
-
-Direct imports of another product's internal implementation packages are prohibited. A shared protocol/schema package may exist only after the cross-product contract is frozen, versioned, and explicitly owned.
-
-# Current Scope
-
-Implementation begins with **Phase 0 — Traffic Observation Foundation**.
-
-Phase 0 uses AF_XDP and proves the physical observation foundation before later subsystems are implemented.
-
-Secure Access, Stronghold Agent endpoint enforcement, IDS/IPS, full firewall enforcement, HA, recovery/DR, complete cryptographic journals, and other later systems remain outside Phase 0 even when their architecture is already defined.
-
-`docs/ROADMAP.md` governs implementation sequencing.
+Stronghold Access implementation, Agent endpoint enforcement, Pathfinder integration, IDS/IPS, secure access, HA, full firewall enforcement, and other later systems remain outside Phase 0 even where their architecture is already defined.
 
 # Engineering Completeness Test
 
 > **When this fails at 2:00 AM, will Stronghold tell the operator exactly what it observed, what it decided, why it decided it, what it actually did, and what it could not establish?**
 
-A feature is incomplete if it cannot distinguish observation, authorization, attempted action, actual result, failure, gap, degraded coverage, and remaining recoverable history.
-
-# Governing Architecture Index
+A complete feature should preserve enough state/history to answer:
 
 ```text
-docs/PROJECT-BOUNDARIES.md        product/implementation ownership
-docs/AF-XDP.md                    FW packet acquisition
-docs/STATEFUL-ENFORCEMENT.md      FW stateful enforcement
-docs/CONFIGURATION-GOVERNANCE.md  configuration authority
-docs/POLICY-SIMULATION.md         pre-commit simulation
-docs/MANAGEMENT-PLANE.md          management authority/surfaces
-docs/JOURNAL-EXPORT.md            SIEM/log export
-docs/NET-HUNTER-RECORDS.md        Hunter records/search/reprocessing
-docs/OBSERVABILITY.md             health/alerting
-docs/SUPPORT-DIAGNOSTICS.md       support/vendor OOB
-docs/IDS-INSPECTION.md            future TLS/IDS inspection
-docs/SECURE-ACCESS.md             earlier detailed secure-access model
-docs/access/ARCHITECTURE.md       authoritative Stronghold Access product
-docs/agent/ARCHITECTURE.md        authoritative Stronghold Agent product
-docs/ROADMAP.md                   implementation sequencing
+what was observed?
+what was known?
+what was unknown?
+what was decided?
+why?
+what was actually performed?
+what was NOT_PERFORMED?
+what failed?
+what history remains?
+what was lost or could not be established?
 ```
+
+Pathfinder-enriched features add one more requirement: Stronghold must also be able to establish **which Pathfinder record/interpretation influenced the result and whether that interpretation existed at the time or was applied retrospectively later.**
+
+# Governing Documents
+
+Focused architecture includes:
+
+```text
+docs/PROJECT-BOUNDARIES.md
+docs/AF-XDP.md
+docs/JOURNAL-EXPORT.md
+docs/NET-HUNTER-RECORDS.md
+docs/CONFIGURATION-GOVERNANCE.md
+docs/STATEFUL-ENFORCEMENT.md
+docs/POLICY-SIMULATION.md
+docs/MANAGEMENT-PLANE.md
+docs/OBSERVABILITY.md
+docs/SUPPORT-DIAGNOSTICS.md
+docs/SECURE-ACCESS.md
+docs/access/ARCHITECTURE.md
+docs/ENDPOINT-ENFORCEMENT.md
+docs/agent/ARCHITECTURE.md
+docs/IDS-INSPECTION.md
+docs/PATHFINDER-INTEGRATION.md
+docs/ROADMAP.md
+```
+
+Where older secure-access/endpoint documents conflict with current component ownership, `docs/PROJECT-BOUNDARIES.md`, `docs/access/ARCHITECTURE.md`, and `docs/agent/ARCHITECTURE.md` govern.
