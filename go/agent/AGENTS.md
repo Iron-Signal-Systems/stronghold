@@ -1,4 +1,4 @@
-# Stronghold Agent Go Project Rules
+# Stronghold Agent Go Component Rules
 
 ## Scope
 
@@ -8,9 +8,9 @@ This file governs implementation under:
 go/agent/
 ```
 
-This subtree is reserved for **Stronghold Agent**, the endpoint application and endpoint Policy Enforcement Point.
+This subtree is reserved for **Stronghold Agent**, the endpoint-side Stronghold component and endpoint Policy Enforcement Point.
 
-Stronghold Agent is a separate project from:
+Stronghold Agent is a separate implementation boundary from:
 
 ```text
 go/access/
@@ -18,9 +18,17 @@ Stronghold FW implementation
 Stronghold Net-Hunter implementation
 ```
 
-Do not place Stronghold Access server/control-plane implementation, Stronghold FW dataplane/capture code, or Net-Hunter processing code in this subtree.
+These boundaries preserve ownership and authority inside one tightly coupled Stronghold platform; they do not make Agent an unrelated standalone product.
 
-See `docs/agent/ARCHITECTURE.md`.
+Do not place Stronghold Access control-plane implementation, Stronghold FW dataplane/capture code, or Net-Hunter processing code in this subtree.
+
+See:
+
+```text
+docs/PROJECT-BOUNDARIES.md
+docs/agent/ARCHITECTURE.md
+docs/PATHFINDER-INTEGRATION.md
+```
 
 ## Initial Platform
 
@@ -32,7 +40,7 @@ Do not implement Windows behavior by repeatedly parsing PowerShell, `netsh`, WMI
 
 Future Linux or macOS Agent implementations, if approved, must target those platforms natively rather than forcing Windows-specific abstractions across all operating systems.
 
-## Product Responsibility
+## Component Responsibility
 
 Stronghold Agent may own endpoint responsibilities such as:
 
@@ -50,7 +58,7 @@ endpoint decision records
 revocation handling
 ```
 
-Stronghold Agent does not own the Stronghold Access Policy Engine, Stronghold FW network authorization, network-admission authority, or Net-Hunter historical authority.
+Stronghold Agent does not own the Stronghold Access Policy Engine, Stronghold FW network authorization, network-admission authority, Net-Hunter historical authority, or Pathfinder threat-intelligence authority.
 
 ## Stronghold Access Boundary
 
@@ -62,7 +70,7 @@ go/access/
 
 Agent code must not import Access internal implementation packages.
 
-The Agent receives authenticated/versioned policy and session state through explicit contracts.
+The Agent receives authenticated/versioned policy and session state through explicit Stronghold contracts.
 
 Preserve:
 
@@ -85,6 +93,7 @@ FW / network admission
     establishes VLAN / zone / attachment context
         ↓
 Stronghold Access
+    correlates endpoint / identity / posture / optional intelligence
     evaluates applicable policy
         ↓
 signed monotonic Agent policy generation
@@ -115,6 +124,36 @@ endpoint DENY  != FW observed DENY
 If the Agent denies a connection before network transmission, record an endpoint denial. Do not manufacture a FW observation for traffic the FW never received.
 
 The Agent may reduce unnecessary FW processing by stopping disallowed connections locally, but it can never grant network permission that the FW would otherwise deny.
+
+## Pathfinder Boundary
+
+Pathfinder is a separate Iron Signal Systems threat-intelligence system. It is not a Stronghold component and is not an Agent policy authority.
+
+Stronghold Agent should normally **not communicate directly with Pathfinder**.
+
+Preferred relationship:
+
+```text
+Pathfinder
+    ↓
+Stronghold Access
+    ↓
+signed / versioned Stronghold Agent policy
+    ↓
+Stronghold Agent
+```
+
+The Agent may enforce a policy that was influenced by Pathfinder context, but it must not translate a Pathfinder match directly into local enforcement outside the authorized Access policy contract.
+
+Preserve:
+
+```text
+Pathfinder match        != endpoint DENY authority
+Pathfinder risk signal  != endpoint compromised
+Pathfinder unavailable  != endpoint trusted
+```
+
+If Pathfinder materially influenced the Access policy, the Agent decision record should retain the applicable policy/Access lineage so Hunter can later correlate the external intelligence reference without making the Agent a Pathfinder client.
 
 ## Process / Application Identity
 
@@ -221,7 +260,7 @@ Agent reports VLAN/zone != network-side VLAN/zone established
 
 Do not create generic packages named `common`, `shared`, `util`, `helpers`, or `framework` merely to share implementation with Access or FW.
 
-If a real shared wire/schema contract is required, freeze and version that contract explicitly. Keep endpoint-specific behavior in the Agent project.
+If a real shared wire/schema contract is required, freeze and version that contract explicitly. Keep endpoint-specific behavior in the Agent component.
 
 ## Go Engineering
 
@@ -258,8 +297,10 @@ endpoint policy current      != FW policy current
 endpoint denied locally      != FW denied packet
 network context received     != endpoint policy activated
 application identified       != application trusted
+Pathfinder match             != endpoint compromised
+Pathfinder risk signal       != endpoint policy decision
 ```
 
 ## Security Principle
 
-> **Stronghold Agent establishes and enforces the endpoint side of the access decision. It does not impersonate Stronghold Access or Stronghold FW.**
+> **Stronghold Agent establishes and enforces the endpoint side of the Stronghold access decision. It does not impersonate Stronghold Access, Stronghold FW, Net-Hunter, or Pathfinder.**
