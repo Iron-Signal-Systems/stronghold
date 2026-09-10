@@ -2,9 +2,11 @@
 
 ## Purpose
 
-**Stronghold Access** is the Stronghold access-control product and control framework.
+**Stronghold Access** is the Stronghold platform's access-control and authorization-coordination infrastructure component.
 
-Stronghold Access is deployable independently of Stronghold FW and may run on a supported customer virtual machine or supported bare-metal host. When Stronghold FW is present, Access integrates with it as a first-class Stronghold control-plane peer rather than becoming part of the FW process or operating-system image.
+Stronghold Access is **not a separate standalone commercial product**. It is the third Stronghold infrastructure node when deployed, running on a supported customer virtual machine or supported bare-metal server on the customer's network.
+
+Stronghold Access is deliberately kept out of the high-PPS Stronghold FW dataplane, but it is tightly coupled to the Stronghold platform through explicit authenticated/versioned contracts.
 
 Stronghold Access owns access-control responsibilities such as:
 
@@ -19,60 +21,76 @@ resource-scoped authorization
 revocation / reevaluation
 policy distribution to Stronghold Agent
 controlled integration with Stronghold FW
+optional Pathfinder intelligence / risk inputs
 ```
 
 Stronghold Access does **not** own Stronghold FW packet capture, routing, NAT, dataplane forwarding, physical-interface observation, FW Traffic Decision Journals, or Net-Hunter authoritative packet history.
 
-## Product Boundary
+## Platform Boundary
 
 ```text
-STRONGHOLD PLATFORM
+                         STRONGHOLD PLATFORM
 
 Stronghold FW
-    physical enforcement appliance
+    physical observation / enforcement appliance
 
 Stronghold Net-Hunter
     historical preservation / processing / hunt appliance
 
 Stronghold Access
-    VM or bare-metal access-control system
+    third infrastructure component
+    customer VM or bare-metal server
+    control / identity / authorization coordination
 
 Stronghold Agent
-    endpoint application / endpoint PEP
+    endpoint component / endpoint PEP
 ```
 
-Stronghold Access and Stronghold Agent are separate implementation projects inside the Stronghold repository.
+Stronghold Access and Stronghold Agent remain separate implementation trees inside the Stronghold repository, but those implementation boundaries do not make them unrelated products.
 
-Their implementation trees must remain separate. They communicate through explicitly defined, versioned Stronghold contracts rather than direct imports of one another's internal implementation packages.
+They communicate through explicitly defined, versioned Stronghold contracts rather than direct imports of one another's internal implementation packages.
 
-## Deployment Models
+See `docs/PROJECT-BOUNDARIES.md`.
 
-### Standalone
+## Deployment Model
 
-Stronghold Access may be deployed without Stronghold FW.
+Stronghold Access is intended to run on the customer's network as either:
 
 ```text
-                 STRONGHOLD ACCESS
-                        |
-          +-------------+-------------+
-          |             |             |
-          v             v             v
-   Stronghold Agent   RADIUS/AAA   Switch / AP
-      endpoint PEP                  802.1X PEP
+supported customer virtual machine
+or
+supported customer bare-metal server
 ```
 
-Standalone deployment may provide endpoint identity, posture, process/application-aware endpoint enforcement, network-admission integration, Access Session control, revocation, and related policy services.
+Conceptually:
 
-Standalone Access does not claim Stronghold FW physical-interface packet history, Stronghold FW network-side enforcement, or Stronghold FW decision-journal authority when no Stronghold FW is present.
+```text
+                    STRONGHOLD ACCESS
+                           |
+          +----------------+----------------+
+          |                |                |
+          v                v                v
+   Stronghold Agent    RADIUS / AAA     Stronghold FW
+    endpoint PEP       802.1X context    network PEP
+          |                |                |
+          +----------------+----------------+
+                           |
+                           v
+                   authorization context
+```
 
-### Stronghold FW Bolt-On
+Stronghold Access is control-plane infrastructure, not the Stronghold FW high-rate packet dataplane. Its sizing and qualification should therefore be based on endpoint population, authentication/authorization rate, AAA rate, policy distribution, revocation rate, session count, state/database behavior, and availability requirements rather than packet PPS.
 
-When Stronghold FW is present, Access integrates through an authenticated, narrowly scoped control interface.
+Exact supported host OS, hypervisors, database/storage model, HA model, backup/recovery model, and sizing profiles remain to be frozen.
+
+## Stronghold FW Integration
+
+Stronghold Access integrates with Stronghold FW through an authenticated, narrowly scoped Stronghold control contract.
 
 ```text
 Stronghold Access
        |
-       | mTLS
+       | mTLS / approved authenticated transport
        | explicit peer authorization
        | versioned control contract
        v
@@ -97,6 +115,8 @@ service / protocol authorization
 session expiration
 policy generation
 revocation reason
+network-context generation
+Pathfinder-derived risk context where policy permits
 ```
 
 The exact wire schema, signing, replay protection, sequencing, lease behavior, and failure handling must be frozen before implementation.
@@ -113,22 +133,26 @@ The exact wire schema, signing, replay protection, sequencing, lease behavior, a
 
 > **Endpoint ALLOW never grants permission that Stronghold FW would otherwise deny.**
 
+> **Pathfinder intelligence is an input to policy, not policy authority by itself.**
+
 Mandatory separations include:
 
 ```text
-802.1X authenticated             != resource authorized
-RADIUS Access-Accept             != Stronghold Access GRANT
-AAA user authenticated           != device trusted
-device trusted                   != posture acceptable
-posture acceptable               != process authorized
-process authorized               != resource authorized
-Access GRANT                     != FW ALLOW
-endpoint ALLOW                   != FW ALLOW
-endpoint DENY                    != FW observed DENY
-WireGuard peer authenticated     != user authenticated
-tunnel established              != resource authorized
-network assignment               != trusted endpoint
-MAB admitted                     != 802.1X authenticated
+802.1X authenticated                 != resource authorized
+RADIUS Access-Accept                 != Stronghold Access GRANT
+AAA user authenticated               != device trusted
+device trusted                       != posture acceptable
+posture acceptable                   != process authorized
+process authorized                   != resource authorized
+Access GRANT                         != FW ALLOW
+endpoint ALLOW                       != FW ALLOW
+endpoint DENY                        != FW observed DENY
+WireGuard peer authenticated         != user authenticated
+tunnel established                  != resource authorized
+network assignment                   != trusted endpoint
+MAB admitted                         != 802.1X authenticated
+Pathfinder risk signal               != automatic Access REVOKE
+Pathfinder malicious classification  != compromise proven
 ```
 
 ## First-Class 802.1X Network Admission
@@ -229,7 +253,7 @@ Returned AAA attributes are inputs to Stronghold authorization. They do not beco
 
 ## Three Session Types
 
-Stronghold Access should preserve three different session concepts.
+Stronghold Access preserves three different session concepts.
 
 ### Network Access Session
 
@@ -305,7 +329,7 @@ Transport Session
 
 ## Stronghold Agent Relationship
 
-Stronghold Agent is the endpoint application and endpoint Policy Enforcement Point.
+Stronghold Agent is the endpoint-side Stronghold component and endpoint Policy Enforcement Point.
 
 Stronghold Access remains the control framework / policy authority.
 
@@ -328,12 +352,12 @@ See `docs/agent/ARCHITECTURE.md`.
 
 ## Network Context and Endpoint Policy Distribution
 
-When Stronghold FW is present, it can contribute network-side facts that the endpoint itself cannot authoritatively self-assert, including observed VLAN, zone, interface, address association, and other qualified attachment context.
+Stronghold FW and qualified network-admission sources can contribute network-side facts that the endpoint itself cannot authoritatively self-assert, including observed VLAN, zone, interface, address association, and other qualified attachment context.
 
 The intended control flow is:
 
 ```text
-Stronghold FW
+Stronghold FW / network admission
     establishes network-side context
         |
         | authenticated/versioned fact exchange
@@ -411,6 +435,60 @@ FW authorized traffic
 
 The first Windows direction is process/application-aware connection authorization, not a requirement for endpoint deep-payload inspection. Any later payload-aware proxy or WFP callout-driver architecture is separately qualified.
 
+## Pathfinder Intelligence / Risk Input
+
+Stronghold Access may consume approved Pathfinder intelligence as one input to authorization and reevaluation.
+
+Pathfinder remains a separate ISS threat-intelligence authority. It does not become the Stronghold Policy Engine.
+
+Potential Pathfinder-derived inputs may include:
+
+```text
+observable classification
+confidence
+freshness / age
+campaign or malware association
+Pathfinder Record ID
+interpretation generation/version
+source provenance
+relationship to a Stronghold endpoint/session/resource
+```
+
+An example flow is:
+
+```text
+Stronghold observation / IDS context
+        |
+        v
+Pathfinder enrichment
+        |
+        v
+Stronghold Access reevaluation
+        |
+        +-- maintain authorization
+        +-- require MFA reauthentication
+        +-- reduce resource scope
+        +-- shorten lease
+        +-- REVOKE
+        +-- request network-admission reevaluation / CoA
+```
+
+The result is controlled by Stronghold Access policy.
+
+```text
+Pathfinder risk signal
+!=
+automatic Access Session revocation
+
+Pathfinder match
+!=
+endpoint compromise proven
+```
+
+When Pathfinder materially influences an Access decision, the Access record/journal lineage should retain the Pathfinder Record ID and interpretation/version used.
+
+See `docs/PATHFINDER-INTEGRATION.md`.
+
 ## Protected Endpoint Integration
 
 Stronghold Access may place selected endpoints into a **Protected Endpoint** mode implemented by Stronghold Agent.
@@ -477,6 +555,7 @@ device compromise state
 Access Session expiration
 network-admission state change
 network-context change
+approved Pathfinder intelligence/risk change
 ```
 
 Where supported and authorized, RADIUS Dynamic Authorization / Change of Authorization may be used to request reauthentication, quarantine, or disconnect at the network-admission layer.
@@ -484,7 +563,7 @@ Where supported and authorized, RADIUS Dynamic Authorization / Change of Authori
 Conceptually:
 
 ```text
-posture / trust / network context changes
+posture / trust / network context / intelligence changes
         |
         v
 Stronghold Access reevaluates
@@ -515,7 +594,7 @@ FW policy allows
 forwarding succeeded
 ```
 
-When Access is integrated, the FW may consume authenticated Access Session state as a policy fact. It still applies normal Stronghold policy, routing, NAT, path, tunnel, and enforcement semantics.
+The FW may consume authenticated Access Session state as a policy fact. It still applies normal Stronghold policy, routing, NAT, path, tunnel, and enforcement semantics.
 
 Stronghold Access must never become a hidden route around normal FW policy.
 
@@ -530,12 +609,13 @@ Stronghold Agent endpoint decision
 Stronghold FW decision
 WireGuard transport/session state
 network-context generation
+Pathfinder Record / interpretation reference
 related authoritative packet segments
 ```
 
 Correlation is derived interpretation and does not rewrite source authority.
 
-Net-Hunter is not required for Access to make routine authorization decisions unless a later explicit design changes that boundary.
+Net-Hunter is not required for Access to make routine authorization decisions.
 
 ## Availability and Failure Boundaries
 
@@ -549,6 +629,8 @@ DEGRADED
 HOLDOVER
 AAA_UNAVAILABLE
 POLICY_UNAVAILABLE
+PATHFINDER_UNAVAILABLE
+PATHFINDER_STALE
 REVOCATION_DEGRADED
 CONTROL_CHANNEL_UNAVAILABLE
 RECOVERY
@@ -568,19 +650,7 @@ into:
 trusted
 ```
 
-## VM and Bare-Metal Deployment
-
-Stronghold Access is intended to support qualified deployment as either:
-
-```text
-customer virtual machine
-or
-customer bare-metal host
-```
-
-Stronghold Access is control-plane infrastructure, not the Stronghold FW high-rate packet dataplane. Its hardware/performance qualification should therefore be based on control-plane workloads such as endpoint population, authorization rate, AAA rate, policy distribution, revocation rate, session count, database/storage behavior, and availability requirements.
-
-Exact supported hypervisors, host operating system, database/storage model, HA model, sizing profiles, backup/recovery model, and appliance/package lifecycle remain to be frozen.
+Pathfinder unavailability must not be represented as a safe intelligence result.
 
 ## Implementation Boundary
 
@@ -596,7 +666,7 @@ Stronghold Agent implementation belongs under:
 go/agent/
 ```
 
-The two projects must not directly import one another's internal implementation packages.
+The two components must not directly import one another's internal implementation packages.
 
 Do not create a generic shared framework to make the separation disappear. Shared protocol/schema code may be introduced only after a real versioned contract requires it and its ownership is explicit.
 
@@ -621,12 +691,13 @@ posture model
 policy language / generations
 network-context fact contract from FW/admission
 Agent control protocol
-FW bolt-on control protocol
+FW control protocol
+Pathfinder intelligence/risk input contract
+Pathfinder freshness/holdover semantics
 mTLS / trust / certificate lifecycle
 replay / downgrade protection
 session lease / expiration behavior
 revocation semantics
-standalone failure behavior
 FW-integrated failure behavior
 HA / recovery / backup
 journaling / audit records
@@ -637,4 +708,4 @@ upgrade / rollback
 
 ## Engineering Principle
 
-> **Stronghold Access establishes and evaluates authorization context. It does not erase the independent authority of the endpoint, the network-admission system, or Stronghold FW.**
+> **Stronghold Access coordinates authorization across the Stronghold platform. It does not erase the independent authority of endpoint enforcement, network admission, Stronghold FW, or Pathfinder's threat-intelligence interpretation.**
