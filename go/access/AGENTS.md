@@ -1,4 +1,4 @@
-# Stronghold Access Go Project Rules
+# Stronghold Access Go Component Rules
 
 ## Scope
 
@@ -8,9 +8,11 @@ This file governs implementation under:
 go/access/
 ```
 
-This subtree is reserved for **Stronghold Access**, the standalone/bolt-on access-control system.
+This subtree is reserved for **Stronghold Access**, the Stronghold platform's access-control and authorization-coordination infrastructure component.
 
-Stronghold Access is a separate project from:
+Stronghold Access is the third Stronghold infrastructure node when deployed and is intended to run on a supported customer VM or supported bare-metal server on the customer's network.
+
+It is a separate implementation boundary from:
 
 ```text
 go/agent/
@@ -18,9 +20,11 @@ Stronghold FW implementation
 Stronghold Net-Hunter implementation
 ```
 
+These boundaries do not make the components unrelated products. They exist to preserve ownership, authority, security, failure domains, and maintainability inside one tightly coupled Stronghold platform.
+
 Do not place Stronghold Agent endpoint implementation, Stronghold FW dataplane/capture code, or Net-Hunter processing code in this subtree.
 
-## Product Responsibility
+## Component Responsibility
 
 Stronghold Access owns control-plane responsibilities such as:
 
@@ -36,11 +40,18 @@ policy evaluation
 revocation / reevaluation
 Agent policy/session distribution
 controlled Stronghold FW integration
+optional Pathfinder intelligence/risk inputs
 ```
 
-Stronghold Access does not own packet capture, routing, NAT, FW dataplane enforcement, endpoint WFP enforcement, or Hunter authoritative history.
+Stronghold Access does not own packet capture, routing, NAT, FW dataplane enforcement, endpoint WFP enforcement, Hunter authoritative history, or Pathfinder threat-intelligence authority.
 
-See `docs/access/ARCHITECTURE.md`.
+See:
+
+```text
+docs/PROJECT-BOUNDARIES.md
+docs/access/ARCHITECTURE.md
+docs/PATHFINDER-INTEGRATION.md
+```
 
 ## Deployment Boundary
 
@@ -49,12 +60,12 @@ Stronghold Access is intended to support qualified deployment on either:
 ```text
 customer VM
 or
-customer bare-metal host
+customer bare-metal server
 ```
 
 The exact supported operating system, hypervisor matrix, storage/database model, HA model, and sizing profiles are not yet frozen.
 
-Do not hard-code an unsupported deployment assumption into shared contracts before those decisions are made.
+Do not hard-code an unsupported deployment assumption into cross-component contracts before those decisions are made.
 
 ## First-Class 802.1X
 
@@ -135,6 +146,8 @@ FW / network admission establishes network context
         ↓
 Stronghold Access correlates context + identity + posture
         ↓
+optional approved Pathfinder context contributes policy input
+        ↓
 Stronghold Access evaluates policy
         ↓
 signed monotonic Agent policy generation
@@ -148,6 +161,7 @@ Preserve:
 
 ```text
 network context received  != endpoint policy evaluated
+Pathfinder context received != Access decision made
 policy generated          != policy delivered
 policy delivered          != policy activated
 policy activated          != Agent enforcement healthy
@@ -157,7 +171,7 @@ The endpoint must not be able to self-assert a trusted VLAN/zone and obtain broa
 
 ## Stronghold FW Boundary
 
-Stronghold Access is a bolt-on peer to Stronghold FW, not part of the FW process image.
+Stronghold Access is a tightly integrated Stronghold control peer to FW, not part of the FW process image.
 
 Access must not require unrestricted root, shell, package-manager, filesystem, or arbitrary-command authority over the FW.
 
@@ -166,13 +180,32 @@ The FW integration should use a narrowly scoped, authenticated control contract.
 Preserve:
 
 ```text
-Access GRANT != FW ALLOW
+Access GRANT  != FW ALLOW
 endpoint ALLOW != FW ALLOW
 ```
 
 FW remains an independent network PEP.
 
 FW-supplied VLAN/zone/interface/address context may be an input to Access policy, but Access must preserve that context as a sourced fact rather than silently convert it into permanent endpoint trust.
+
+## Pathfinder Boundary
+
+Pathfinder is a separate Iron Signal Systems threat-intelligence authority, not a Stronghold component and not an Access Policy Engine.
+
+Access may consume approved Pathfinder intelligence/risk context through the future versioned Stronghold↔Pathfinder contract.
+
+Preserve:
+
+```text
+Pathfinder record exists           != observable malicious
+Pathfinder malicious classification != compromise proven
+Pathfinder risk signal             != Access Session revoked
+Pathfinder unavailable             != observable trusted
+```
+
+If Pathfinder context influences a Stronghold Access decision, preserve sufficient provenance to identify the Pathfinder Record ID / interpretation generation used.
+
+Do not implement direct Agent↔Pathfinder communication from this subtree merely for convenience. Agent receives the resulting authorized Stronghold policy through Access.
 
 ## Local Endpoint Enforcement Boundary
 
@@ -191,12 +224,12 @@ Initial endpoint enforcement is not a requirement for general deep-payload inspe
 
 Do not create generic packages named `common`, `shared`, `util`, `helpers`, or `framework` merely to share implementation with Agent or FW.
 
-If a real cross-project wire/schema contract becomes necessary:
+If a real cross-component wire/schema contract becomes necessary:
 
 1. freeze the contract;
 2. define ownership and versioning;
-3. keep implementation-specific behavior in its owning project;
-4. avoid direct imports of another project's internal packages.
+3. keep implementation-specific behavior in its owning component;
+4. avoid direct imports of another component's internal packages.
 
 ## Go Engineering
 
@@ -216,6 +249,7 @@ internal/posture/
 internal/revocation/
 internal/session/
 internal/transport/
+internal/intelligence/
 ```
 
 Do not create these packages before actual implementation work requires them.
@@ -227,17 +261,19 @@ Stronghold Access must preserve what each source can actually establish.
 Examples:
 
 ```text
-AAA authenticated         != Stronghold authorized
-certificate valid         != device authorized
-posture unavailable       != posture passed
-CoA requested             != CoA applied
-FW reports VLAN/zone      != endpoint permanently trusted
-policy sent               != policy activated
-Agent reachable           != Agent enforcement healthy
-FW reachable              != FW authorization granted
-endpoint process allowed  != FW traffic allowed
+AAA authenticated          != Stronghold authorized
+certificate valid          != device authorized
+posture unavailable        != posture passed
+CoA requested              != CoA applied
+FW reports VLAN/zone       != endpoint permanently trusted
+Pathfinder match           != endpoint compromised
+Pathfinder risk signal     != Access REVOKE performed
+policy sent                != policy activated
+Agent reachable            != Agent enforcement healthy
+FW reachable               != FW authorization granted
+endpoint process allowed   != FW traffic allowed
 ```
 
 ## Security Principle
 
-> **Stronghold Access coordinates authorization. It does not erase or impersonate the independent authority of network admission, endpoint enforcement, or Stronghold FW.**
+> **Stronghold Access coordinates authorization across the Stronghold platform. It does not erase or impersonate the independent authority of network admission, endpoint enforcement, Stronghold FW, Net-Hunter history, or Pathfinder threat-intelligence interpretation.**
